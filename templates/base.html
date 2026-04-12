@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="ja">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>{{ title or "ヤフオク通知ボード" }}</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}" />
+  </head>
+  <body>
+    <div class="page-shell">
+      <header class="hero-shell">
+        <div class="hero-card">
+          <div class="brand-row">
+            <p class="eyebrow">YAHUOKU ALERT DESK</p>
+            <nav class="page-nav">
+              <a
+                href="{{ url_for('new_alert') }}"
+                class="nav-link {% if active_page == 'new' %}is-active{% endif %}"
+              >
+                新規登録
+              </a>
+              <a
+                href="{{ url_for('alert_list') }}"
+                class="nav-link {% if active_page == 'list' %}is-active{% endif %}"
+              >
+                一覧表
+              </a>
+            </nav>
+          </div>
+          <h1>{{ page_heading }}</h1>
+          <p class="lead">{{ page_description }}</p>
+        </div>
+      </header>
+
+      {% with messages = get_flashed_messages(with_categories=true) %}
+        {% if messages %}
+          <div class="flash-stack">
+            {% for category, message in messages %}
+              <div class="flash flash-{{ category }}">{{ message }}</div>
+            {% endfor %}
+          </div>
+        {% endif %}
+      {% endwith %}
+
+      <section class="smtp-banner {% if discord.configured %}smtp-ok{% else %}smtp-warning{% endif %}">
+        <div class="smtp-copy">
+          {% if discord.configured %}
+            <h2>Discord Webhook設定は有効です</h2>
+            <p>
+              Bot名 {{ discord.username }}
+              {% if discord.mention_text %}
+                / メンション {{ discord.mention_text }}
+              {% endif %}
+            </p>
+          {% else %}
+            <h2>Discord Webhook未設定のため、通知は送信されません</h2>
+            <p>
+              `.env` に `DISCORD_WEBHOOK_URL` を入れてから Flask を再起動してください。
+              不足: {{ discord.missing_fields|join(", ") }}
+            </p>
+          {% endif %}
+        </div>
+
+        <form action="{{ url_for('send_discord_test') }}" method="post" class="smtp-test-form">
+          <input type="hidden" name="redirect_to" value="{{ request.path }}" />
+          <button type="submit" class="dark-pill" {% if not discord.configured %}disabled{% endif %}>
+            Discordテスト通知
+          </button>
+        </form>
+      </section>
+
+      {% block content %}{% endblock %}
+    </div>
+  </body>
+</html>

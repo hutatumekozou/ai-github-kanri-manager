@@ -1,0 +1,139 @@
+{% extends "base.html" %}
+{% set title = "一覧表 | ヤフオク通知ボード" %}
+{% set page_heading = "一覧表" %}
+{% set page_description = "検索、絞り込み、Discord送信ON/OFF切り替え、削除をまとめて行えます。" %}
+
+{% block content %}
+  <section class="panel filter-panel">
+    <form action="{{ url_for('alert_list') }}" method="get" class="filter-row">
+      <input
+        type="search"
+        name="q"
+        value="{{ filters.q }}"
+        placeholder="商品名、URL、メモで検索"
+        class="pill-input search-input"
+      />
+
+      <select name="status" class="pill-input">
+        <option value="all" {% if filters.status == 'all' %}selected{% endif %}>すべて</option>
+        <option value="pending" {% if filters.status == 'pending' %}selected{% endif %}>送信待ち</option>
+        <option value="disabled" {% if filters.status == 'disabled' %}selected{% endif %}>停止中</option>
+        <option value="sent" {% if filters.status == 'sent' %}selected{% endif %}>送信済み</option>
+        <option value="failed" {% if filters.status == 'failed' %}selected{% endif %}>失敗</option>
+      </select>
+
+      <select name="enabled" class="pill-input">
+        <option value="all" {% if filters.enabled == 'all' %}selected{% endif %}>自動送信: すべて</option>
+        <option value="enabled" {% if filters.enabled == 'enabled' %}selected{% endif %}>自動送信: ON</option>
+        <option value="disabled" {% if filters.enabled == 'disabled' %}selected{% endif %}>自動送信: OFF</option>
+      </select>
+
+      <button type="submit" class="dark-pill">絞り込み</button>
+      <a href="{{ url_for('new_alert') }}" class="dark-pill ghost-dark">新規登録へ</a>
+    </form>
+
+    <div class="summary-grid">
+      <div class="summary-chip">
+        <span>全件</span>
+        <strong>{{ counts.total }}</strong>
+      </div>
+      <div class="summary-chip">
+        <span>送信待ち</span>
+        <strong>{{ counts.pending }}</strong>
+      </div>
+      <div class="summary-chip">
+        <span>送信済み</span>
+        <strong>{{ counts.sent }}</strong>
+      </div>
+      <div class="summary-chip">
+        <span>失敗</span>
+        <strong>{{ counts.failed }}</strong>
+      </div>
+      <div class="summary-chip">
+        <span>停止中</span>
+        <strong>{{ counts.disabled }}</strong>
+      </div>
+    </div>
+  </section>
+
+  <section class="panel table-panel">
+    {% if alerts %}
+      <div class="table-wrap">
+        <table class="alert-table">
+          <thead>
+            <tr>
+              <th>ID</th>
+              <th>商品名</th>
+              <th>商品URL</th>
+              <th>通知先</th>
+              <th>自動通知</th>
+              <th>通知時刻</th>
+              <th>状態</th>
+              <th>メモ</th>
+              <th>操作</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for alert in alerts %}
+              <tr>
+                <td class="id-cell">#{{ alert.id }}</td>
+                <td>
+                  <div class="cell-title">{{ alert.item_name or "未入力" }}</div>
+                  <div class="cell-sub">{{ alert.created_at|datetime_jst }} 登録</div>
+                  {% if alert.bid_amount or alert.auction_end_at %}
+                    <div class="cell-sub">
+                      入札金額: {{ alert.bid_amount or "-" }}<br />
+                      終了時刻: {{ alert.auction_end_at|datetime_jst }}
+                    </div>
+                  {% endif %}
+                </td>
+                <td class="url-cell">
+                  <a href="{{ alert.item_url }}" target="_blank" rel="noopener noreferrer">
+                    リンクを開く
+                  </a>
+                  <div class="cell-sub">{{ alert.item_url }}</div>
+                </td>
+                <td>Discord</td>
+                <td>
+                  <span class="toggle-pill {% if alert.enabled %}is-on{% else %}is-off{% endif %}">
+                    {{ alert|automation_label }}
+                  </span>
+                </td>
+                <td>{{ alert.notify_at|datetime_jst }}</td>
+                <td>
+                  <span class="status status-{{ alert.status }}">{{ alert.status }}</span>
+                  {% if alert.error_message %}
+                    <div class="error-text">{{ alert.error_message }}</div>
+                  {% endif %}
+                </td>
+                <td class="note-cell">{{ alert.note or "-" }}</td>
+                <td>
+                  <div class="action-stack">
+                    {% if alert.status != "sent" %}
+                      <form action="{{ url_for('toggle_alert', alert_id=alert.id) }}" method="post">
+                        <button type="submit" class="ghost-button">
+                          {% if alert.enabled %}切り替え OFF{% else %}切り替え ON{% endif %}
+                        </button>
+                      </form>
+                    {% endif %}
+                    <form
+                      action="{{ url_for('delete_alert', alert_id=alert.id) }}"
+                      method="post"
+                      onsubmit="return confirm('この通知を削除しますか？');"
+                    >
+                      <button type="submit" class="ghost-button danger-button">削除</button>
+                    </form>
+                  </div>
+                </td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    {% else %}
+      <div class="empty-state">
+        条件に一致する通知がありません。新規登録ページから追加してください。
+      </div>
+    {% endif %}
+  </section>
+{% endblock %}

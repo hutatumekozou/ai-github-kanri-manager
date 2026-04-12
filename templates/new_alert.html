@@ -1,0 +1,73 @@
+{% extends "base.html" %}
+{% set title = "新規登録 | ヤフオク通知ボード" %}
+{% set page_heading = "新規登録" %}
+{% set page_description = "ヤフオクの商品URLと通知時刻を登録して、指定時刻にDiscordへ通知します。" %}
+
+{% block content %}
+  <section class="panel form-panel">
+    <form action="{{ url_for('create_alert') }}" method="post" class="entry-form">
+      <div class="toggle-banner">
+        <label class="check-row">
+          <input type="checkbox" name="enabled" checked />
+          <span>Discord自動通知を有効にする</span>
+        </label>
+        <p>ON の場合は指定時刻にDiscordへ送信、OFF の場合は下書き保存のみです。</p>
+      </div>
+
+      <div class="form-grid">
+        <label class="field">
+          <span>商品名</span>
+          <input type="text" name="item_name" placeholder="例: コーチ 二つ折り財布" />
+        </label>
+
+        <label class="field">
+          <span>商品URL</span>
+          <input
+            type="url"
+            name="item_url"
+            placeholder="https://page.auctions.yahoo.co.jp/jp/auction/..."
+            required
+          />
+        </label>
+
+        <label class="field">
+          <span>通知時刻</span>
+          <input type="datetime-local" name="notify_at" min="{{ min_notify_at }}" required />
+        </label>
+
+        <div class="field info-card">
+          <span>通知先</span>
+          <div class="static-value">Discord Webhook チャンネル</div>
+        </div>
+      </div>
+
+      <div class="form-grid">
+        <label class="field">
+          <span>入札金額</span>
+          <input type="text" name="bid_amount" placeholder="例: 12000円" />
+        </label>
+
+        <label class="field">
+          <span>オークション終了時刻</span>
+          <input type="datetime-local" name="auction_end_at" />
+        </label>
+      </div>
+
+      <label class="field field-block">
+        <span>メモ</span>
+        <textarea
+          name="note"
+          rows="6"
+          placeholder="入札予定額、終了直前に確認したいこと、補足メモなど"
+        ></textarea>
+      </label>
+
+      <div class="form-footer">
+        <div class="meta-note">
+          現在時刻: {{ now.strftime("%Y-%m-%d %H:%M") }} ({{ now.tzinfo.key }})
+        </div>
+        <button type="submit" class="primary-button">通知を登録する</button>
+      </div>
+    </form>
+  </section>
+{% endblock %}
