@@ -50,6 +50,10 @@ python3 app.py
 
 ## Vercelについて
 
-- Vercel ではローカルSQLiteと常駐スケジューラ前提の構成は安定運用できません。
-- このリポジトリを Vercel に載せる場合、画面表示はできますが、登録保存と時刻通知は本番用途には向きません。
-- 通知までWeb公開で運用するなら、外部DBとCron対応に組み替えるか、常駐型ホスティングを使ってください。
+- Vercel本番で通知まで運用するには `DATABASE_URL` と `CRON_SECRET` を Environment Variables に設定します。
+- Vercel本番では常駐スケジューラを使わず、`/api/cron` を定期実行して「今送るべき通知」を処理します。
+- このリポジトリには GitHub Actions で5分ごとに `/api/cron` を呼ぶ workflow を含めています。
+- GitHub repository secrets に以下を設定してください。
+  - `CRON_ENDPOINT_URL`: 例 `https://yahuoku-tuuchi.vercel.app/api/cron`
+  - `CRON_SECRET`: `.env` と同じ値
+- Vercel で外部DBが未設定だと、画面は表示できますが登録保存は無効です。

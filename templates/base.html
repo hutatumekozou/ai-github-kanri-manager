@@ -71,11 +71,19 @@
 
       {% if app_env.is_vercel %}
         <section class="vercel-banner">
-          <h2>Vercel公開モード</h2>
-          <p>
-            このURLでは画面表示はできますが、ローカルSQLite保存と常駐スケジューラ通知はVercelでは安定動作しません。
-            本番で通知まで動かすには、外部DBとCron対応の構成か、常駐系ホスティングが必要です。
-          </p>
+          {% if app_env.has_persistent_storage %}
+            <h2>Vercel本番モード</h2>
+            <p>
+              外部DBで保存し、定期実行から `/api/cron` を呼ぶ構成です。
+              GitHub Actions などの5分周期実行を使うと、通知は数分以内に送信されます。
+            </p>
+          {% else %}
+            <h2>Vercel公開モード</h2>
+            <p>
+              画面表示はできますが、まだ外部DBが未設定です。Vercel の Environment Variables に `DATABASE_URL`
+              を入れると、登録内容を永続保存できるようになります。
+            </p>
+          {% endif %}
         </section>
       {% endif %}
 
