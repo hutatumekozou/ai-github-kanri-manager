@@ -200,6 +200,28 @@ textarea {
   flex: 0 0 auto;
 }
 
+.vercel-banner {
+  margin: 0 0 12px;
+  padding: 14px 18px;
+  border: 1px solid #f3d6ab;
+  border-radius: 18px;
+  background: linear-gradient(135deg, #fff8ee, #fff4d9);
+  box-shadow: var(--shadow);
+}
+
+.vercel-banner h2 {
+  margin: 0;
+  font-size: 1rem;
+  color: #8c4b00;
+}
+
+.vercel-banner p {
+  margin: 6px 0 0;
+  color: #744f1f;
+  line-height: 1.5;
+  font-size: 0.87rem;
+}
+
 .dark-pill:disabled {
   opacity: 0.55;
   cursor: not-allowed;
@@ -371,6 +393,13 @@ textarea {
 .dark-pill:hover,
 .ghost-button:hover {
   transform: translateY(-1px);
+}
+
+.primary-button:disabled,
+.ghost-button:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+  transform: none;
 }
 
 .filter-panel {

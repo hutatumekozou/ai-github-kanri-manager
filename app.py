@@ -19,7 +19,8 @@ from flask import Flask, flash, g, redirect, render_template, request, url_for
 load_dotenv()
 
 BASE_DIR = Path(__file__).resolve().parent
-DATABASE_PATH = BASE_DIR / "app.db"
+IS_VERCEL = bool(os.getenv("VERCEL"))
+DATABASE_PATH = Path("/tmp/app.db") if IS_VERCEL else BASE_DIR / "app.db"
 TIMEZONE = ZoneInfo(os.getenv("APP_TIMEZONE", "Asia/Tokyo"))
 
 app = Flask(__name__)
@@ -287,7 +288,14 @@ def discord_status() -> dict[str, Any]:
 
 @app.context_processor
 def inject_discord_status() -> dict[str, Any]:
-    return {"discord": discord_status()}
+    return {
+        "discord": discord_status(),
+        "app_env": {
+            "is_vercel": IS_VERCEL,
+            "storage_mode": "ephemeral" if IS_VERCEL else "local",
+            "scheduler_enabled": not IS_VERCEL,
+        },
+    }
 
 
 def send_discord_message(content: str) -> None:
@@ -434,6 +442,10 @@ def alert_list() -> str:
 
 @app.route("/alerts", methods=["POST"])
 def create_alert() -> Any:
+    if IS_VERCEL:
+        flash("Vercel上では登録データ保存と時刻通知は安定動作しません。画面確認用モードです。", "error")
+        return redirect(url_for("new_alert"))
+
     form = request.form
 
     try:
@@ -483,6 +495,10 @@ def create_alert() -> Any:
 
 @app.route("/alerts/<int:alert_id>/toggle", methods=["POST"])
 def toggle_alert(alert_id: int) -> Any:
+    if IS_VERCEL:
+        flash("Vercel上では通知切り替えは無効です。", "error")
+        return redirect(url_for("alert_list"))
+
     alert = fetch_alert(alert_id)
     if alert is None:
         flash("通知が見つかりません。", "error")
@@ -552,6 +568,10 @@ def send_discord_test() -> Any:
 
 @app.route("/alerts/<int:alert_id>/delete", methods=["POST"])
 def delete_alert(alert_id: int) -> Any:
+    if IS_VERCEL:
+        flash("Vercel上では削除操作は無効です。", "error")
+        return redirect(url_for("alert_list"))
+
     db = get_db()
     db.execute("DELETE FROM alerts WHERE id = ?", (alert_id,))
     db.commit()
@@ -562,6 +582,8 @@ def delete_alert(alert_id: int) -> Any:
 
 def bootstrap() -> None:
     init_db()
+    if IS_VERCEL:
+        return
     if not scheduler.running:
         scheduler.start()
     reschedule_pending_alerts()

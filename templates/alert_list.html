@@ -111,7 +111,7 @@
                   <div class="action-stack">
                     {% if alert.status != "sent" %}
                       <form action="{{ url_for('toggle_alert', alert_id=alert.id) }}" method="post">
-                        <button type="submit" class="ghost-button">
+                        <button type="submit" class="ghost-button" {% if app_env.is_vercel %}disabled{% endif %}>
                           {% if alert.enabled %}切り替え OFF{% else %}切り替え ON{% endif %}
                         </button>
                       </form>
@@ -121,7 +121,7 @@
                       method="post"
                       onsubmit="return confirm('この通知を削除しますか？');"
                     >
-                      <button type="submit" class="ghost-button danger-button">削除</button>
+                      <button type="submit" class="ghost-button danger-button" {% if app_env.is_vercel %}disabled{% endif %}>削除</button>
                     </form>
                   </div>
                 </td>
