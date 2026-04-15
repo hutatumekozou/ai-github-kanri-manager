@@ -1,0 +1,116 @@
+{% extends "base.html" %}
+{% set title = work.title ~ " | AI作品管理ボード" %}
+{% set page_heading = work.title %}
+{% set page_description = "作品ごとのGitHubリンク、最終保存日、更新内容を確認できます。" %}
+
+{% block content %}
+  <section class="detail-layout">
+    <article class="panel detail-panel">
+      <div class="detail-meta">
+        <div class="detail-card">
+          <span>最終保存日</span>
+          <strong>{{ work.last_saved_at|datetime_jst }}</strong>
+        </div>
+        <div class="detail-card">
+          <span>更新履歴数</span>
+          <strong>{{ work.update_count }}</strong>
+        </div>
+      </div>
+
+      <div class="memo-box">
+        <div class="feature-head">
+          <h2>このアプリの特徴</h2>
+          {% if request.args.get("edit") == "features" %}
+            <a href="{{ url_for('work_detail', work_id=work.id) }}" class="ghost-button">閉じる</a>
+          {% else %}
+            <a href="{{ url_for('work_detail', work_id=work.id, edit='features') }}" class="ghost-button">編集</a>
+          {% endif %}
+        </div>
+        {% if request.args.get("edit") == "features" %}
+          <form action="{{ url_for('update_work_features', work_id=work.id) }}" method="post" class="entry-form compact-form">
+            <label class="field field-block">
+              <span>このアプリの特徴</span>
+              <textarea
+                name="note"
+                rows="5"
+                placeholder="このアプリの用途、強み、使い方などを書き込めます"
+              >{{ work.note }}</textarea>
+            </label>
+            <div class="feature-actions">
+              <button type="submit" class="primary-button" {% if not app_env.has_persistent_storage %}disabled{% endif %}>
+                保存する
+              </button>
+            </div>
+          </form>
+        {% else %}
+          <p>{{ work.note or "まだ特徴は書かれていません。" }}</p>
+        {% endif %}
+      </div>
+
+      <div class="section-head">
+        <h2>更新履歴</h2>
+        <a href="{{ url_for('work_list') }}" class="ghost-button">一覧へ戻る</a>
+      </div>
+
+      {% if updates %}
+        <div class="timeline">
+          {% for update in updates %}
+            <article class="timeline-item">
+              <div class="timeline-time">{{ update.saved_at|datetime_jst }}</div>
+              <div class="timeline-body">
+                {% if update.update_github_url %}
+                  <a
+                    href="{{ update.update_github_url }}"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    class="update-link"
+                  >
+                    {{ update.update_github_url }}
+                  </a>
+                {% endif %}
+                <p>{{ update.update_content|replace('\n', '<br />')|safe }}</p>
+              </div>
+            </article>
+          {% endfor %}
+        </div>
+      {% else %}
+        <div class="empty-state">この作品にはまだ更新履歴がありません。</div>
+      {% endif %}
+    </article>
+
+    <aside class="panel side-panel">
+      <div class="section-head">
+        <h2>更新を追加</h2>
+      </div>
+      <form action="{{ url_for('create_work_update', work_id=work.id) }}" method="post" class="entry-form compact-form">
+        <label class="field">
+          <span>保存日</span>
+          <input type="datetime-local" name="saved_at" value="{{ default_saved_at }}" required />
+        </label>
+
+        <label class="field">
+          <span>別のGitHubリンク</span>
+          <input
+            type="url"
+            name="update_github_url"
+            placeholder="https://github.com/your-account/another-repo"
+          />
+        </label>
+
+        <label class="field field-block">
+          <span>更新内容</span>
+          <textarea
+            name="update_content"
+            rows="8"
+            placeholder="今回の変更内容や保存時点の状態を記録"
+            required
+          ></textarea>
+        </label>
+
+        <button type="submit" class="primary-button" {% if not app_env.has_persistent_storage %}disabled{% endif %}>
+          更新履歴を追加
+        </button>
+      </form>
+    </aside>
+  </section>
+{% endblock %}

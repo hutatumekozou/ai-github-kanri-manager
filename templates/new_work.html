@@ -1,0 +1,62 @@
+{% extends "base.html" %}
+{% set title = "新規登録 | AI作品管理ボード" %}
+{% set page_heading = "作品を登録" %}
+{% set page_description = "作品名、GitHubリンク、最終保存日、更新内容を登録して、AI作品ごとの履歴を残します。" %}
+
+{% block content %}
+  <section class="panel form-panel">
+    <form action="{{ url_for('create_work') }}" method="post" class="entry-form">
+      <div class="form-grid">
+        <label class="field">
+          <span>作品名</span>
+          <input type="text" name="title" placeholder="例: AIランディングページ自動生成ツール" required />
+        </label>
+
+        <label class="field">
+          <span>GitHubリンク</span>
+          <input
+            type="url"
+            name="github_url"
+            placeholder="https://github.com/your-account/your-repo"
+            required
+          />
+        </label>
+      </div>
+
+      <div class="form-grid form-grid-single">
+        <label class="field">
+          <span>最終保存日</span>
+          <input type="datetime-local" name="saved_at" value="{{ default_saved_at }}" required />
+        </label>
+      </div>
+
+      <label class="field field-block">
+        <span>更新内容</span>
+        <textarea
+          name="update_content"
+          rows="7"
+          placeholder="例: 一覧画面を実装、詳細ページ追加、GitHubリンク表示を調整"
+          required
+        ></textarea>
+      </label>
+
+      <label class="field field-block">
+        <span>このアプリの特徴</span>
+        <textarea
+          name="note"
+          rows="4"
+          placeholder="このアプリの用途、強み、できることなど"
+        ></textarea>
+      </label>
+
+      <div class="form-footer">
+        <div class="meta-note">
+          現在時刻: {{ now.strftime("%Y-%m-%d %H:%M") }} ({{ now.tzinfo.key }})
+        </div>
+        <button type="submit" class="primary-button" {% if not app_env.has_persistent_storage %}disabled{% endif %}>
+          作品を保存する
+        </button>
+      </div>
+    </form>
+  </section>
+{% endblock %}

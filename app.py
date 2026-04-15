@@ -1,20 +1,20 @@
 from __future__ import annotations
 
-import atexit
-import json
 import os
 import sqlite3
-from datetime import datetime, timedelta
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Optional
 from urllib.parse import urlparse
-from urllib.request import Request, urlopen
 from zoneinfo import ZoneInfo
 
-from apscheduler.jobstores.base import JobLookupError
-from apscheduler.schedulers.background import BackgroundScheduler
-from dotenv import load_dotenv
 from flask import Flask, flash, g, redirect, render_template, request, url_for
+
+try:
+    from dotenv import load_dotenv
+except ImportError:
+    def load_dotenv() -> bool:
+        return False
 
 try:
     import psycopg
@@ -35,8 +35,6 @@ TIMEZONE = ZoneInfo(os.getenv("APP_TIMEZONE", "Asia/Tokyo"))
 app = Flask(__name__)
 app.config["SECRET_KEY"] = os.getenv("FLASK_SECRET_KEY", "dev-secret-key")
 
-scheduler = BackgroundScheduler(timezone=str(TIMEZONE))
-
 
 def adapt_query(query: str) -> str:
     return query.replace("?", "%s") if USE_POSTGRES else query
@@ -50,6 +48,7 @@ def open_db_connection() -> Any:
 
     connection = sqlite3.connect(DATABASE_PATH)
     connection.row_factory = sqlite3.Row
+    connection.execute("PRAGMA foreign_keys = ON")
     return connection
 
 
@@ -77,186 +76,134 @@ def init_db() -> None:
             db_execute(
                 connection,
                 """
-                CREATE TABLE IF NOT EXISTS alerts (
+                CREATE TABLE IF NOT EXISTS works (
                     id BIGSERIAL PRIMARY KEY,
-                    item_name TEXT NOT NULL DEFAULT '',
-                    item_url TEXT NOT NULL,
-                    bid_amount TEXT NOT NULL DEFAULT '',
-                    auction_end_at TEXT,
-                    notify_at TEXT NOT NULL,
-                    email_to TEXT NOT NULL DEFAULT '',
+                    title TEXT NOT NULL,
+                    github_url TEXT NOT NULL,
                     note TEXT NOT NULL DEFAULT '',
-                    enabled INTEGER NOT NULL DEFAULT 1,
-                    status TEXT NOT NULL DEFAULT 'pending',
-                    created_at TEXT NOT NULL,
-                    sent_at TEXT,
-                    error_message TEXT,
-                    processing_started_at TEXT
+                    display_order BIGINT NOT NULL DEFAULT 0,
+                    created_at TEXT NOT NULL
                 )
                 """,
             )
             db_execute(
                 connection,
-                "ALTER TABLE alerts ADD COLUMN IF NOT EXISTS item_name TEXT NOT NULL DEFAULT ''",
+                "ALTER TABLE works ADD COLUMN IF NOT EXISTS display_order BIGINT NOT NULL DEFAULT 0",
             )
             db_execute(
                 connection,
-                "ALTER TABLE alerts ADD COLUMN IF NOT EXISTS bid_amount TEXT NOT NULL DEFAULT ''",
+                """
+                CREATE TABLE IF NOT EXISTS work_updates (
+                    id BIGSERIAL PRIMARY KEY,
+                    work_id BIGINT NOT NULL REFERENCES works(id) ON DELETE CASCADE,
+                    saved_at TEXT NOT NULL,
+                    update_github_url TEXT,
+                    update_content TEXT NOT NULL,
+                    created_at TEXT NOT NULL
+                )
+                """,
             )
             db_execute(
                 connection,
-                "ALTER TABLE alerts ADD COLUMN IF NOT EXISTS auction_end_at TEXT",
-            )
-            db_execute(
-                connection,
-                "ALTER TABLE alerts ADD COLUMN IF NOT EXISTS enabled INTEGER NOT NULL DEFAULT 1",
-            )
-            db_execute(
-                connection,
-                "ALTER TABLE alerts ADD COLUMN IF NOT EXISTS email_to TEXT NOT NULL DEFAULT ''",
-            )
-            db_execute(
-                connection,
-                "ALTER TABLE alerts ADD COLUMN IF NOT EXISTS processing_started_at TEXT",
+                "ALTER TABLE work_updates ADD COLUMN IF NOT EXISTS update_github_url TEXT",
             )
         else:
             db_execute(
                 connection,
                 """
-                CREATE TABLE IF NOT EXISTS alerts (
+                CREATE TABLE IF NOT EXISTS works (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    item_name TEXT NOT NULL DEFAULT '',
-                    item_url TEXT NOT NULL,
-                    bid_amount TEXT NOT NULL DEFAULT '',
-                    auction_end_at TEXT,
-                    notify_at TEXT NOT NULL,
-                    email_to TEXT NOT NULL DEFAULT '',
+                    title TEXT NOT NULL,
+                    github_url TEXT NOT NULL,
                     note TEXT NOT NULL DEFAULT '',
-                    enabled INTEGER NOT NULL DEFAULT 1,
-                    status TEXT NOT NULL DEFAULT 'pending',
+                    display_order INTEGER NOT NULL DEFAULT 0,
+                    created_at TEXT NOT NULL
+                )
+                """,
+            )
+            work_columns = {
+                row[1]
+                for row in db_execute(connection, "PRAGMA table_info(works)").fetchall()
+            }
+            if "display_order" not in work_columns:
+                db_execute(
+                    connection,
+                    "ALTER TABLE works ADD COLUMN display_order INTEGER NOT NULL DEFAULT 0",
+                )
+            db_execute(
+                connection,
+                """
+                CREATE TABLE IF NOT EXISTS work_updates (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    work_id INTEGER NOT NULL,
+                    saved_at TEXT NOT NULL,
+                    update_github_url TEXT,
+                    update_content TEXT NOT NULL,
                     created_at TEXT NOT NULL,
-                    sent_at TEXT,
-                    error_message TEXT,
-                    processing_started_at TEXT
+                    FOREIGN KEY (work_id) REFERENCES works(id) ON DELETE CASCADE
                 )
                 """,
             )
             columns = {
                 row[1]
-                for row in db_execute(connection, "PRAGMA table_info(alerts)").fetchall()
+                for row in db_execute(connection, "PRAGMA table_info(work_updates)").fetchall()
             }
-            if "item_name" not in columns:
+            if "update_github_url" not in columns:
                 db_execute(
                     connection,
-                    "ALTER TABLE alerts ADD COLUMN item_name TEXT NOT NULL DEFAULT ''",
+                    "ALTER TABLE work_updates ADD COLUMN update_github_url TEXT",
                 )
-            if "bid_amount" not in columns:
-                db_execute(
-                    connection,
-                    "ALTER TABLE alerts ADD COLUMN bid_amount TEXT NOT NULL DEFAULT ''",
-                )
-            if "auction_end_at" not in columns:
-                db_execute(connection, "ALTER TABLE alerts ADD COLUMN auction_end_at TEXT")
-            if "enabled" not in columns:
-                db_execute(
-                    connection,
-                    "ALTER TABLE alerts ADD COLUMN enabled INTEGER NOT NULL DEFAULT 1",
-                )
-            if "email_to" not in columns:
-                db_execute(
-                    connection,
-                    "ALTER TABLE alerts ADD COLUMN email_to TEXT NOT NULL DEFAULT ''",
-                )
-            if "processing_started_at" not in columns:
-                db_execute(
-                    connection,
-                    "ALTER TABLE alerts ADD COLUMN processing_started_at TEXT",
-                )
-        connection.commit()
-    finally:
-        connection.close()
-
-
-def list_alerts(
-    search: str = "",
-    status_filter: str = "all",
-    enabled_filter: str = "all",
-) -> list[sqlite3.Row]:
-    db = get_db()
-    conditions = []
-    params: list[Any] = []
-
-    if search:
-        like = f"%{search}%"
-        conditions.append(
-            """
-            (
-                item_name LIKE ?
-                OR item_url LIKE ?
-                OR note LIKE ?
-            )
-            """
-        )
-        params.extend([like, like, like])
-
-    if status_filter in {"pending", "processing", "sent", "failed", "disabled"}:
-        conditions.append("status = ?")
-        params.append(status_filter)
-
-    if enabled_filter == "enabled":
-        conditions.append("enabled = 1")
-    elif enabled_filter == "disabled":
-        conditions.append("enabled = 0")
-
-    where_clause = f"WHERE {' AND '.join(conditions)}" if conditions else ""
-    query = f"""
-        SELECT
-            id,
-            item_name,
-            item_url,
-            bid_amount,
-            auction_end_at,
-            notify_at,
-            email_to,
-            note,
-            enabled,
-            status,
-            created_at,
-            sent_at,
-            error_message
-        FROM alerts
-        {where_clause}
-        ORDER BY notify_at ASC, id DESC
-    """
-    return db_execute(db, query, tuple(params)).fetchall()
-
-
-def fetch_alert(alert_id: int) -> Optional[sqlite3.Row]:
-    connection = open_db_connection()
-    try:
-        return db_execute(
+        db_execute(
             connection,
             """
-            SELECT
-                id,
-                item_name,
-                item_url,
-                bid_amount,
-                auction_end_at,
-                notify_at,
-                email_to,
-                note,
-                enabled,
-                status,
-                created_at,
-                sent_at,
-                error_message,
-                processing_started_at
-            FROM alerts
-            WHERE id = ?
+            UPDATE work_updates
+            SET update_github_url = (
+                SELECT github_url
+                FROM works
+                WHERE works.id = work_updates.work_id
+            )
+            WHERE update_github_url IS NULL
+              AND id IN (
+                SELECT MIN(id)
+                FROM work_updates
+                GROUP BY work_id
+                )
             """,
-            (alert_id,),
-        ).fetchone()
+        )
+        ordered_work_ids = [
+            row["id"]
+            for row in db_execute(
+                connection,
+                """
+                SELECT
+                    w.id
+                FROM works w
+                ORDER BY COALESCE(
+                    (
+                        SELECT wu.saved_at
+                        FROM work_updates wu
+                        WHERE wu.work_id = w.id
+                        ORDER BY wu.saved_at DESC, wu.id DESC
+                        LIMIT 1
+                    ),
+                    w.created_at
+                ) DESC,
+                w.id DESC
+                """,
+            ).fetchall()
+        ]
+        for index, work_id in enumerate(ordered_work_ids, start=1):
+            db_execute(
+                connection,
+                """
+                UPDATE works
+                SET display_order = ?
+                WHERE id = ?
+                  AND (display_order IS NULL OR display_order = 0)
+                """,
+                (index, work_id),
+            )
+        connection.commit()
     finally:
         connection.close()
 
@@ -264,33 +211,23 @@ def fetch_alert(alert_id: int) -> Optional[sqlite3.Row]:
 def normalize_url(raw_url: str) -> str:
     parsed = urlparse(raw_url.strip())
     if parsed.scheme not in {"http", "https"} or not parsed.netloc:
-        raise ValueError("商品URLは http または https で始まる正しいリンクを指定してください。")
+        raise ValueError("GitHubリンクは http または https で始まる正しいURLを指定してください。")
     return raw_url.strip()
 
 
-def parse_notify_at(raw_notify_at: str) -> datetime:
-    try:
-        notify_at = datetime.strptime(raw_notify_at, "%Y-%m-%dT%H:%M")
-    except ValueError as exc:
-        raise ValueError("通知時刻の形式が正しくありません。") from exc
-
-    notify_at = notify_at.replace(tzinfo=TIMEZONE)
-    if notify_at <= datetime.now(TIMEZONE):
-        raise ValueError("通知時刻は現在より後の時間を指定してください。")
-    return notify_at
-
-
-def parse_optional_datetime(raw_value: str) -> str | None:
-    value = raw_value.strip()
+def normalize_optional_url(raw_url: str) -> str | None:
+    value = raw_url.strip()
     if not value:
         return None
+    return normalize_url(value)
 
+
+def parse_saved_at(raw_saved_at: str) -> datetime:
     try:
-        parsed = datetime.strptime(value, "%Y-%m-%dT%H:%M")
+        saved_at = datetime.strptime(raw_saved_at, "%Y-%m-%dT%H:%M")
     except ValueError as exc:
-        raise ValueError("オークション終了時刻の形式が正しくありません。") from exc
-
-    return parsed.replace(tzinfo=TIMEZONE).isoformat()
+        raise ValueError("最終保存日の形式が正しくありません。") from exc
+    return saved_at.replace(tzinfo=TIMEZONE)
 
 
 def format_datetime(value: str | None) -> str:
@@ -302,85 +239,127 @@ def format_datetime(value: str | None) -> str:
 app.jinja_env.filters["datetime_jst"] = format_datetime
 
 
-def automation_label(alert: sqlite3.Row) -> str:
-    if alert["status"] == "sent":
-        return "完了"
-    return "ON" if alert["enabled"] else "OFF"
+def list_works(search: str = "") -> list[Any]:
+    db = get_db()
+    conditions = []
+    params: list[Any] = []
+
+    if search:
+        like = f"%{search}%"
+        conditions.append(
+            """
+            (
+                w.title LIKE ?
+                OR w.github_url LIKE ?
+                OR w.note LIKE ?
+                OR EXISTS (
+                    SELECT 1
+                    FROM work_updates wu
+                    WHERE wu.work_id = w.id
+                      AND (
+                        wu.update_content LIKE ?
+                        OR COALESCE(wu.update_github_url, '') LIKE ?
+                      )
+                )
+            )
+            """
+        )
+        params.extend([like, like, like, like, like])
+
+    where_clause = f"WHERE {' AND '.join(conditions)}" if conditions else ""
+    query = f"""
+        SELECT
+            w.id,
+            w.title,
+            w.github_url,
+            w.note,
+            w.display_order,
+            w.created_at,
+            (
+                SELECT wu.saved_at
+                FROM work_updates wu
+                WHERE wu.work_id = w.id
+                ORDER BY wu.saved_at DESC, wu.id DESC
+                LIMIT 1
+            ) AS last_saved_at,
+            (
+                SELECT wu.update_content
+                FROM work_updates wu
+                WHERE wu.work_id = w.id
+                ORDER BY wu.saved_at DESC, wu.id DESC
+                LIMIT 1
+            ) AS latest_update_content,
+            (
+                SELECT COUNT(*)
+                FROM work_updates wu
+                WHERE wu.work_id = w.id
+            ) AS update_count
+        FROM works w
+        {where_clause}
+        ORDER BY w.display_order ASC, w.id DESC
+    """
+    return db_execute(db, query, tuple(params)).fetchall()
 
 
-app.jinja_env.filters["automation_label"] = automation_label
-
-
-def alert_counts() -> dict[str, int]:
+def work_summary() -> dict[str, int]:
     db = get_db()
     row = db_execute(
         db,
         """
         SELECT
-            COUNT(*) AS total_count,
-            SUM(CASE WHEN status = 'pending' THEN 1 ELSE 0 END) AS pending_count,
-            SUM(CASE WHEN status = 'processing' THEN 1 ELSE 0 END) AS processing_count,
-            SUM(CASE WHEN status = 'sent' THEN 1 ELSE 0 END) AS sent_count,
-            SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END) AS failed_count,
-            SUM(CASE WHEN status = 'disabled' THEN 1 ELSE 0 END) AS disabled_count
-        FROM alerts
+            (SELECT COUNT(*) FROM works) AS work_count,
+            (SELECT COUNT(*) FROM work_updates) AS update_count
         """,
     ).fetchone()
     return {
-        "total": row["total_count"] or 0,
-        "pending": row["pending_count"] or 0,
-        "processing": row["processing_count"] or 0,
-        "sent": row["sent_count"] or 0,
-        "failed": row["failed_count"] or 0,
-        "disabled": row["disabled_count"] or 0,
+        "works": row["work_count"] or 0,
+        "updates": row["update_count"] or 0,
     }
 
 
-def schedule_alert(alert_id: int, notify_at: datetime) -> None:
-    scheduler.add_job(
-        func=send_notification_job,
-        trigger="date",
-        run_date=notify_at,
-        args=[alert_id],
-        id=f"alert-{alert_id}",
-        replace_existing=True,
-        misfire_grace_time=300,
-    )
+def fetch_work(work_id: int) -> Optional[Any]:
+    db = get_db()
+    return db_execute(
+        db,
+        """
+        SELECT
+            w.id,
+            w.title,
+            w.github_url,
+            w.note,
+            w.display_order,
+            w.created_at,
+            (
+                SELECT wu.saved_at
+                FROM work_updates wu
+                WHERE wu.work_id = w.id
+                ORDER BY wu.saved_at DESC, wu.id DESC
+                LIMIT 1
+            ) AS last_saved_at,
+            (
+                SELECT COUNT(*)
+                FROM work_updates wu
+                WHERE wu.work_id = w.id
+            ) AS update_count
+        FROM works w
+        WHERE w.id = ?
+        """,
+        (work_id,),
+    ).fetchone()
 
 
-def unschedule_alert(alert_id: int) -> None:
-    try:
-        scheduler.remove_job(f"alert-{alert_id}")
-    except JobLookupError:
-        return
-
-
-def discord_config() -> dict[str, Any]:
-    return {
-        "webhook_url": os.getenv("DISCORD_WEBHOOK_URL", ""),
-        "username": os.getenv("DISCORD_USERNAME", "Yahuoku Alert Bot"),
-        "avatar_url": os.getenv("DISCORD_AVATAR_URL", ""),
-        "mention_text": os.getenv("DISCORD_MENTION_TEXT", ""),
-    }
-
-
-def missing_discord_fields() -> list[str]:
-    config = discord_config()
-    required_keys = ("webhook_url",)
-    return [key for key in required_keys if not config[key]]
-
-
-def discord_status() -> dict[str, Any]:
-    config = discord_config()
-    missing = missing_discord_fields()
-    return {
-        "configured": not missing,
-        "missing_fields": missing,
-        "webhook_url": config["webhook_url"],
-        "username": config["username"],
-        "avatar_url": config["avatar_url"],
-        "mention_text": config["mention_text"],
-    }
+def fetch_work_updates(work_id: int) -> list[Any]:
+    db = get_db()
+    return db_execute(
+        db,
+        """
+        SELECT id, saved_at, update_github_url, update_content, created_at
+        FROM work_updates
+        WHERE work_id = ?
+        ORDER BY saved_at DESC, id DESC
+        """,
+        (work_id,),
+    ).fetchall()
 
 
 def app_runtime_status() -> dict[str, Any]:
@@ -388,466 +367,267 @@ def app_runtime_status() -> dict[str, Any]:
         "is_vercel": IS_VERCEL,
         "use_postgres": USE_POSTGRES,
         "has_persistent_storage": USE_POSTGRES or not IS_VERCEL,
-        "scheduler_mode": "github_actions_or_vercel_cron" if IS_VERCEL else "local_apscheduler",
-        "cron_secret_configured": bool(os.getenv("CRON_SECRET", "").strip()),
     }
 
 
+def next_work_display_order() -> int:
+    db = get_db()
+    row = db_execute(db, "SELECT COALESCE(MAX(display_order), 0) AS max_display_order FROM works").fetchone()
+    return int(row["max_display_order"] or 0) + 1
+
+
 @app.context_processor
-def inject_discord_status() -> dict[str, Any]:
+def inject_runtime_status() -> dict[str, Any]:
     return {
-        "discord": discord_status(),
         "app_env": app_runtime_status(),
     }
 
 
-def send_discord_message(content: str) -> None:
-    config = discord_config()
-    missing = missing_discord_fields()
-    if missing:
-        raise RuntimeError(f"Discord設定が不足しています: {', '.join(missing)}")
-
-    message_parts = [config["mention_text"].strip(), content.strip()]
-    payload = {
-        "content": "\n".join(part for part in message_parts if part),
-        "username": config["username"],
-    }
-    if config["avatar_url"]:
-        payload["avatar_url"] = config["avatar_url"]
-
-    request = Request(
-        config["webhook_url"],
-        data=json.dumps(payload).encode("utf-8"),
-        headers={
-            "Content-Type": "application/json",
-            "User-Agent": "Mozilla/5.0",
-        },
-        method="POST",
-    )
-    with urlopen(request, timeout=30) as response:
-        status_code = getattr(response, "status", response.getcode())
-        if status_code >= 400:
-            raise RuntimeError(f"Discord Webhook送信に失敗しました: HTTP {status_code}")
-
-
-def send_discord_notification(alert: sqlite3.Row) -> None:
-    notify_at = format_datetime(alert["notify_at"])
-    auction_end_at = format_datetime(alert["auction_end_at"])
-    content = "\n".join(
-        [
-            "ヤフオク通知",
-            "",
-            f"商品名: {alert['item_name'] or '未入力'}",
-            f"商品URL: {alert['item_url']}",
-            f"入札金額: {alert['bid_amount'] or '-'}",
-            f"オークション終了時刻: {auction_end_at}",
-            f"通知時刻: {notify_at} ({TIMEZONE.key})",
-            f"メモ: {alert['note'] or '-'}",
-        ]
-    )
-    send_discord_message(content)
-
-
-def mark_alert_sent(alert_id: int) -> None:
-    timestamp = datetime.now(TIMEZONE).isoformat()
-    connection = open_db_connection()
-    try:
-        db_execute(
-            connection,
-            """
-            UPDATE alerts
-            SET status = 'sent', sent_at = ?, error_message = NULL, processing_started_at = NULL
-            WHERE id = ?
-            """,
-            (timestamp, alert_id),
-        )
-        connection.commit()
-    finally:
-        connection.close()
-
-
-def mark_alert_failed(alert_id: int, error_message: str) -> None:
-    connection = open_db_connection()
-    try:
-        db_execute(
-            connection,
-            """
-            UPDATE alerts
-            SET status = 'failed', error_message = ?, processing_started_at = NULL
-            WHERE id = ?
-            """,
-            (error_message[:500], alert_id),
-        )
-        connection.commit()
-    finally:
-        connection.close()
-
-
-def fetch_and_claim_due_alerts(limit: int = 50) -> list[Any]:
-    now = datetime.now(TIMEZONE)
-    now_iso = now.isoformat()
-    stale_cutoff_iso = (now - timedelta(minutes=15)).isoformat()
-    connection = open_db_connection()
-
-    try:
-        rows = db_execute(
-            connection,
-            """
-            SELECT
-                id,
-                item_name,
-                item_url,
-                bid_amount,
-                auction_end_at,
-                notify_at,
-                email_to,
-                note,
-                enabled,
-                status,
-                created_at,
-                sent_at,
-                error_message,
-                processing_started_at
-            FROM alerts
-            WHERE enabled = 1
-              AND notify_at <= ?
-              AND (
-                status = 'pending'
-                OR (
-                  status = 'processing'
-                  AND (
-                    processing_started_at IS NULL
-                    OR processing_started_at <= ?
-                  )
-                )
-              )
-            ORDER BY notify_at ASC, id ASC
-            LIMIT ?
-            """,
-            (now_iso, stale_cutoff_iso, limit),
-        ).fetchall()
-
-        claimed_rows = []
-        for row in rows:
-            cursor = db_execute(
-                connection,
-                """
-                UPDATE alerts
-                SET status = 'processing', processing_started_at = ?, error_message = NULL
-                WHERE id = ?
-                  AND enabled = 1
-                  AND (
-                    status = 'pending'
-                    OR (
-                      status = 'processing'
-                      AND (
-                        processing_started_at IS NULL
-                        OR processing_started_at <= ?
-                      )
-                    )
-                  )
-                """,
-                (now_iso, row["id"], stale_cutoff_iso),
-            )
-            if cursor.rowcount == 1:
-                claimed_rows.append(row)
-
-        connection.commit()
-        return claimed_rows
-    finally:
-        connection.close()
-
-
-def process_due_alerts(limit: int = 50) -> dict[str, Any]:
-    claimed_rows = fetch_and_claim_due_alerts(limit=limit)
-    sent_count = 0
-    failed_count = 0
-
-    for alert in claimed_rows:
-        try:
-            send_discord_notification(alert)
-        except Exception as exc:
-            mark_alert_failed(alert["id"], str(exc))
-            failed_count += 1
-            continue
-
-        mark_alert_sent(alert["id"])
-        sent_count += 1
-
-    return {
-        "checked": len(claimed_rows),
-        "sent": sent_count,
-        "failed": failed_count,
-    }
-
-
-def is_authorized_cron_request() -> bool:
-    secret = os.getenv("CRON_SECRET", "").strip()
-    if not secret:
-        return True
-    return request.headers.get("Authorization") == f"Bearer {secret}"
-
-
-def send_notification_job(alert_id: int) -> None:
-    alert = fetch_alert(alert_id)
-    if alert is None or alert["status"] != "pending" or not alert["enabled"]:
-        return
-
-    try:
-        send_discord_notification(alert)
-    except Exception as exc:
-        mark_alert_failed(alert_id, str(exc))
-        return
-
-    mark_alert_sent(alert_id)
-
-
-def reschedule_pending_alerts() -> None:
-    connection = open_db_connection()
-    try:
-        pending_alerts = db_execute(
-            connection,
-            """
-            SELECT id, notify_at
-            FROM alerts
-            WHERE status = 'pending' AND enabled = 1
-            """,
-        ).fetchall()
-    finally:
-        connection.close()
-
-    now = datetime.now(TIMEZONE)
-    for alert in pending_alerts:
-        notify_at = datetime.fromisoformat(alert["notify_at"]).astimezone(TIMEZONE)
-        if notify_at <= now:
-            send_notification_job(alert["id"])
-            continue
-        schedule_alert(alert["id"], notify_at)
-
-
 @app.route("/", methods=["GET"])
 def index() -> Any:
-    return redirect(url_for("new_alert"))
+    return redirect(url_for("work_list"))
 
 
-@app.route("/alerts/new", methods=["GET"])
-def new_alert() -> str:
-    now = datetime.now(TIMEZONE)
-    return render_template(
-        "new_alert.html",
-        now=now,
-        min_notify_at=now.strftime("%Y-%m-%dT%H:%M"),
-        active_page="new",
-    )
-
-
-@app.route("/alerts/list", methods=["GET"])
-def alert_list() -> str:
+@app.route("/works", methods=["GET"])
+def work_list() -> str:
     search = request.args.get("q", "").strip()
-    status_filter = request.args.get("status", "all")
-    enabled_filter = request.args.get("enabled", "all")
-    alerts = list_alerts(search, status_filter, enabled_filter)
+    works = list_works(search)
     return render_template(
-        "alert_list.html",
-        alerts=alerts,
-        now=datetime.now(TIMEZONE),
-        filters={
-            "q": search,
-            "status": status_filter,
-            "enabled": enabled_filter,
-        },
-        counts=alert_counts(),
+        "work_list.html",
+        works=works,
+        filters={"q": search},
+        counts=work_summary(),
         active_page="list",
     )
 
 
-@app.route("/alerts", methods=["POST"])
-def create_alert() -> Any:
+@app.route("/works/new", methods=["GET"])
+def new_work() -> str:
+    now = datetime.now(TIMEZONE)
+    return render_template(
+        "new_work.html",
+        now=now,
+        default_saved_at=now.strftime("%Y-%m-%dT%H:%M"),
+        active_page="new",
+    )
+
+
+@app.route("/works", methods=["POST"])
+def create_work() -> Any:
     if not app_runtime_status()["has_persistent_storage"]:
         flash("この環境では永続DBが未設定です。DATABASE_URL を設定してください。", "error")
-        return redirect(url_for("new_alert"))
+        return redirect(url_for("new_work"))
 
     form = request.form
 
     try:
-        item_name = form.get("item_name", "").strip()
-        item_url = normalize_url(form.get("item_url", ""))
-        bid_amount = form.get("bid_amount", "").strip()
-        auction_end_at = parse_optional_datetime(form.get("auction_end_at", ""))
-        notify_at = parse_notify_at(form.get("notify_at", ""))
+        title = form.get("title", "").strip()
+        github_url = normalize_url(form.get("github_url", ""))
+        saved_at = parse_saved_at(form.get("saved_at", ""))
+        update_content = form.get("update_content", "").strip()
         note = form.get("note", "").strip()
     except ValueError as exc:
         flash(str(exc), "error")
-        return redirect(url_for("new_alert"))
+        return redirect(url_for("new_work"))
 
-    enabled = form.get("enabled") == "on"
-    status = "pending" if enabled else "disabled"
-    created_at = datetime.now(TIMEZONE).isoformat()
+    if not title:
+        flash("作品名を入力してください。", "error")
+        return redirect(url_for("new_work"))
+
+    if not update_content:
+        flash("更新内容を入力してください。", "error")
+        return redirect(url_for("new_work"))
+
+    timestamp = datetime.now(TIMEZONE).isoformat()
     db = get_db()
-    params = (
-        item_name,
-        item_url,
-        bid_amount,
-        auction_end_at,
-        notify_at.isoformat(),
-        "",
-        note,
-        int(enabled),
-        status,
-        created_at,
-        None,
-    )
+
     if USE_POSTGRES:
         cursor = db_execute(
             db,
             """
-            INSERT INTO alerts (
-                item_name, item_url, bid_amount, auction_end_at, notify_at, email_to, note, enabled, status, created_at, processing_started_at
-            )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO works (title, github_url, note, display_order, created_at)
+            VALUES (?, ?, ?, ?, ?)
             RETURNING id
             """,
-            params,
+            (title, github_url, note, next_work_display_order(), timestamp),
         )
-        alert_id = cursor.fetchone()["id"]
+        work_id = cursor.fetchone()["id"]
     else:
         cursor = db_execute(
             db,
             """
-            INSERT INTO alerts (
-                item_name, item_url, bid_amount, auction_end_at, notify_at, email_to, note, enabled, status, created_at, processing_started_at
-            )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO works (title, github_url, note, display_order, created_at)
+            VALUES (?, ?, ?, ?, ?)
             """,
-            params,
+            (title, github_url, note, next_work_display_order(), timestamp),
         )
-        alert_id = cursor.lastrowid
-    db.commit()
-
-    if enabled and not IS_VERCEL:
-        schedule_alert(alert_id, notify_at)
-        flash("通知を登録しました。指定時刻にDiscordへ送信されます。", "success")
-    elif enabled:
-        flash("通知を登録しました。次回のCron実行で送信対象として処理されます。", "success")
-    else:
-        flash("通知を下書き保存しました。一覧画面でONにするとDiscord送信待ちになります。", "success")
-    return redirect(url_for("alert_list"))
-
-
-@app.route("/alerts/<int:alert_id>/toggle", methods=["POST"])
-def toggle_alert(alert_id: int) -> Any:
-    if not app_runtime_status()["has_persistent_storage"]:
-        flash("この環境では永続DBが未設定です。DATABASE_URL を設定してください。", "error")
-        return redirect(url_for("alert_list"))
-
-    alert = fetch_alert(alert_id)
-    if alert is None:
-        flash("通知が見つかりません。", "error")
-        return redirect(url_for("alert_list"))
-
-    if alert["status"] == "sent":
-        flash("送信済みの通知は切り替えできません。", "error")
-        return redirect(url_for("alert_list"))
-
-    notify_at = datetime.fromisoformat(alert["notify_at"]).astimezone(TIMEZONE)
-    db = get_db()
-
-    if alert["enabled"]:
-        db_execute(
-            db,
-            """
-            UPDATE alerts
-            SET enabled = 0, status = 'disabled', processing_started_at = NULL
-            WHERE id = ?
-            """,
-            (alert_id,),
-        )
-        db.commit()
-        unschedule_alert(alert_id)
-        flash("自動送信をOFFにしました。", "success")
-        return redirect(url_for("alert_list"))
-
-    if notify_at <= datetime.now(TIMEZONE):
-        flash("通知時刻が過ぎているため再開できません。削除して再登録してください。", "error")
-        return redirect(url_for("alert_list"))
+        work_id = cursor.lastrowid
 
     db_execute(
         db,
         """
-        UPDATE alerts
-        SET enabled = 1, status = 'pending', error_message = NULL, processing_started_at = NULL
-        WHERE id = ?
+        INSERT INTO work_updates (work_id, saved_at, update_github_url, update_content, created_at)
+        VALUES (?, ?, ?, ?, ?)
         """,
-        (alert_id,),
+        (work_id, saved_at.isoformat(), github_url, update_content, timestamp),
     )
     db.commit()
-    if not IS_VERCEL:
-        schedule_alert(alert_id, notify_at)
-    flash("自動送信をONにしました。", "success")
-    return redirect(url_for("alert_list"))
+
+    flash("作品を登録しました。", "success")
+    return redirect(url_for("work_detail", work_id=work_id))
 
 
-@app.route("/discord/test", methods=["POST"])
-def send_discord_test() -> Any:
-    redirect_to = request.form.get("redirect_to") or url_for("new_alert")
+@app.route("/works/<int:work_id>", methods=["GET"])
+def work_detail(work_id: int) -> Any:
+    work = fetch_work(work_id)
+    if work is None:
+        flash("作品が見つかりません。", "error")
+        return redirect(url_for("work_list"))
 
-    try:
-        send_discord_message(
-            "\n".join(
-                [
-                    "Discord通知のテスト送信です。",
-                    "",
-                    f"送信時刻: {datetime.now(TIMEZONE).strftime('%Y-%m-%d %H:%M:%S')} ({TIMEZONE.key})",
-                    "このメッセージが見えていれば Webhook 設定は有効です。",
-                ]
-            )
-        )
-    except Exception as exc:
-        flash(f"テスト送信に失敗しました: {exc}", "error")
-        return redirect(redirect_to)
-
-    flash("Discordへテスト通知を送信しました。", "success")
-    return redirect(redirect_to)
+    updates = fetch_work_updates(work_id)
+    now = datetime.now(TIMEZONE)
+    return render_template(
+        "work_detail.html",
+        work=work,
+        updates=updates,
+        now=now,
+        default_saved_at=now.strftime("%Y-%m-%dT%H:%M"),
+        active_page="list",
+    )
 
 
-@app.route("/api/cron", methods=["GET", "POST"])
-def cron_dispatch() -> tuple[dict[str, Any], int]:
-    if not is_authorized_cron_request():
-        return {"ok": False, "error": "unauthorized"}, 401
-
-    if not app_runtime_status()["has_persistent_storage"]:
-        return {"ok": False, "error": "database_not_configured"}, 503
-
-    result = process_due_alerts(limit=50)
-    return {"ok": True, **result}, 200
-
-
-@app.route("/alerts/<int:alert_id>/delete", methods=["POST"])
-def delete_alert(alert_id: int) -> Any:
+@app.route("/works/<int:work_id>/updates", methods=["POST"])
+def create_work_update(work_id: int) -> Any:
     if not app_runtime_status()["has_persistent_storage"]:
         flash("この環境では永続DBが未設定です。DATABASE_URL を設定してください。", "error")
-        return redirect(url_for("alert_list"))
+        return redirect(url_for("work_detail", work_id=work_id))
+
+    work = fetch_work(work_id)
+    if work is None:
+        flash("作品が見つかりません。", "error")
+        return redirect(url_for("work_list"))
+
+    try:
+        saved_at = parse_saved_at(request.form.get("saved_at", ""))
+        update_github_url = normalize_optional_url(request.form.get("update_github_url", ""))
+    except ValueError as exc:
+        flash(str(exc), "error")
+        return redirect(url_for("work_detail", work_id=work_id))
+
+    update_content = request.form.get("update_content", "").strip()
+    if not update_content:
+        flash("更新内容を入力してください。", "error")
+        return redirect(url_for("work_detail", work_id=work_id))
 
     db = get_db()
-    db_execute(db, "DELETE FROM alerts WHERE id = ?", (alert_id,))
+    db_execute(
+        db,
+        """
+        INSERT INTO work_updates (work_id, saved_at, update_github_url, update_content, created_at)
+        VALUES (?, ?, ?, ?, ?)
+        """,
+        (
+            work_id,
+            saved_at.isoformat(),
+            update_github_url,
+            update_content,
+            datetime.now(TIMEZONE).isoformat(),
+        ),
+    )
     db.commit()
-    if not IS_VERCEL:
-        unschedule_alert(alert_id)
-    flash("通知を削除しました。", "success")
-    return redirect(url_for("alert_list"))
+
+    flash("更新履歴を追加しました。", "success")
+    return redirect(url_for("work_detail", work_id=work_id))
+
+
+@app.route("/works/<int:work_id>/features", methods=["POST"])
+def update_work_features(work_id: int) -> Any:
+    if not app_runtime_status()["has_persistent_storage"]:
+        flash("この環境では永続DBが未設定です。DATABASE_URL を設定してください。", "error")
+        return redirect(url_for("work_detail", work_id=work_id))
+
+    work = fetch_work(work_id)
+    if work is None:
+        flash("作品が見つかりません。", "error")
+        return redirect(url_for("work_list"))
+
+    features = request.form.get("note", "").strip()
+    db = get_db()
+    db_execute(
+        db,
+        """
+        UPDATE works
+        SET note = ?
+        WHERE id = ?
+        """,
+        (features, work_id),
+    )
+    db.commit()
+
+    flash("このアプリの特徴を更新しました。", "success")
+    return redirect(url_for("work_detail", work_id=work_id))
+
+
+@app.route("/works/reorder", methods=["POST"])
+def reorder_works() -> Any:
+    if not app_runtime_status()["has_persistent_storage"]:
+        flash("この環境では永続DBが未設定です。DATABASE_URL を設定してください。", "error")
+        return redirect(url_for("work_list"))
+
+    raw_order = request.form.get("work_order", "").strip()
+    if not raw_order:
+        flash("並び順データが見つかりません。", "error")
+        return redirect(url_for("work_list"))
+
+    try:
+        ordered_ids = [int(value) for value in raw_order.split(",") if value.strip()]
+    except ValueError:
+        flash("並び順データが不正です。", "error")
+        return redirect(url_for("work_list"))
+
+    db = get_db()
+    existing_ids = {
+        row["id"]
+        for row in db_execute(db, "SELECT id FROM works").fetchall()
+    }
+    if set(ordered_ids) != existing_ids or len(ordered_ids) != len(existing_ids):
+        flash("並び順の保存に失敗しました。ページを再読み込みして再度お試しください。", "error")
+        return redirect(url_for("work_list"))
+
+    for index, work_id in enumerate(ordered_ids, start=1):
+        db_execute(
+            db,
+            """
+            UPDATE works
+            SET display_order = ?
+            WHERE id = ?
+            """,
+            (index, work_id),
+        )
+    db.commit()
+
+    flash("作品の順番を更新しました。", "success")
+    return redirect(url_for("work_list"))
+
+
+@app.route("/works/<int:work_id>/delete", methods=["POST"])
+def delete_work(work_id: int) -> Any:
+    if not app_runtime_status()["has_persistent_storage"]:
+        flash("この環境では永続DBが未設定です。DATABASE_URL を設定してください。", "error")
+        return redirect(url_for("work_list"))
+
+    db = get_db()
+    db_execute(db, "DELETE FROM works WHERE id = ?", (work_id,))
+    db.commit()
+    flash("作品を削除しました。", "success")
+    return redirect(url_for("work_list"))
 
 
 def bootstrap() -> None:
     init_db()
-    if IS_VERCEL:
-        return
-    if not scheduler.running:
-        scheduler.start()
-    reschedule_pending_alerts()
 
 
 bootstrap()
-atexit.register(lambda: scheduler.shutdown(wait=False) if scheduler.running else None)
 
 
 if __name__ == "__main__":

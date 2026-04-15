@@ -1,0 +1,225 @@
+{% extends "base.html" %}
+{% set title = "一覧表 | AI作品管理ボード" %}
+{% set page_heading = "作品一覧表" %}
+{% set page_description = "AIのバイブコーディング作品を一覧で管理し、各作品ごとの更新履歴を詳細ページで確認できます。" %}
+
+{% block content %}
+  <section class="panel filter-panel">
+    <form action="{{ url_for('work_list') }}" method="get" class="filter-row">
+      <input
+        type="search"
+        name="q"
+        value="{{ filters.q }}"
+        placeholder="作品名、GitHubリンク、特徴、更新内容で検索"
+        class="pill-input search-input"
+      />
+      <button type="submit" class="dark-pill">検索する</button>
+      <a href="{{ url_for('new_work') }}" class="dark-pill ghost-dark">作品を追加</a>
+      <button
+        type="button"
+        class="ghost-button"
+        id="sort-toggle-button"
+        {% if filters.q or not app_env.has_persistent_storage %}disabled{% endif %}
+      >
+        順番を編集
+      </button>
+      <button type="button" class="ghost-button sort-mode-action" id="sort-cancel-button" hidden>
+        キャンセル
+      </button>
+      <button type="button" class="dark-pill sort-mode-action" id="sort-save-button" hidden>
+        並び順を保存
+      </button>
+    </form>
+    {% if filters.q %}
+      <p class="sort-note">検索中は順番編集を使えません。並び替えるときは検索を外してください。</p>
+    {% endif %}
+
+    <div class="summary-grid summary-grid-two">
+      <div class="summary-chip">
+        <span>登録作品数</span>
+        <strong>{{ counts.works }}</strong>
+      </div>
+      <div class="summary-chip">
+        <span>更新履歴数</span>
+        <strong>{{ counts.updates }}</strong>
+      </div>
+    </div>
+  </section>
+
+  <section class="panel table-panel">
+    {% if works %}
+      <div class="table-wrap">
+        <table class="work-table">
+          <thead>
+            <tr>
+              <th>作品名</th>
+              <th>更新情報</th>
+              <th>最終保存日</th>
+              <th>このアプリの特徴</th>
+              <th>操作</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for work in works %}
+              <tr data-work-id="{{ work.id }}">
+                <td>
+                  <div class="title-row">
+                    <button type="button" class="drag-handle" aria-label="ドラッグして順番を変更" tabindex="-1">
+                      ≡
+                    </button>
+                    <div class="cell-title">{{ work.title }}</div>
+                  </div>
+                  <div class="cell-sub">{{ work.github_url }}</div>
+                </td>
+                <td>
+                  <a href="{{ url_for('work_detail', work_id=work.id) }}" class="detail-button">中を見る</a>
+                  <div class="cell-sub">
+                    {{ work.update_count }}件の更新履歴
+                    {% if work.latest_update_content %}
+                      <br />
+                      {{ work.latest_update_content[:70] }}{% if work.latest_update_content|length > 70 %}...{% endif %}
+                    {% endif %}
+                  </div>
+                </td>
+                <td>{{ work.last_saved_at|datetime_jst }}</td>
+                <td class="note-cell">{{ work.note or "-" }}</td>
+                <td>
+                  <form
+                    action="{{ url_for('delete_work', work_id=work.id) }}"
+                    method="post"
+                    onsubmit="return confirm('この作品を削除しますか？');"
+                  >
+                    <button type="submit" class="ghost-button danger-button" {% if not app_env.has_persistent_storage %}disabled{% endif %}>
+                      削除
+                    </button>
+                  </form>
+                </td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      <form action="{{ url_for('reorder_works') }}" method="post" id="reorder-form" hidden>
+        <input type="hidden" name="work_order" id="work-order-input" />
+      </form>
+    {% else %}
+      <div class="empty-state">
+        まだ作品がありません。新規登録から AI作品の管理を始めてください。
+      </div>
+    {% endif %}
+  </section>
+{% endblock %}
+
+{% block scripts %}
+  {% if works and not filters.q and app_env.has_persistent_storage %}
+    <script>
+      (() => {
+        const toggleButton = document.getElementById("sort-toggle-button");
+        const saveButton = document.getElementById("sort-save-button");
+        const cancelButton = document.getElementById("sort-cancel-button");
+        const table = document.querySelector(".work-table");
+        const tbody = table?.querySelector("tbody");
+        const reorderForm = document.getElementById("reorder-form");
+        const orderInput = document.getElementById("work-order-input");
+
+        if (!toggleButton || !saveButton || !cancelButton || !tbody || !reorderForm || !orderInput) {
+          return;
+        }
+
+        let sortMode = false;
+        let dragRow = null;
+        let originalOrder = [];
+
+        const rows = () => Array.from(tbody.querySelectorAll("tr[data-work-id]"));
+
+        const syncDraggable = () => {
+          rows().forEach((row) => {
+            row.draggable = sortMode;
+          });
+        };
+
+        const restoreOrder = () => {
+          originalOrder.forEach((id) => {
+            const row = tbody.querySelector(`tr[data-work-id="${id}"]`);
+            if (row) {
+              tbody.appendChild(row);
+            }
+          });
+        };
+
+        const setSortMode = (enabled) => {
+          sortMode = enabled;
+          table.classList.toggle("is-sort-mode", enabled);
+          toggleButton.hidden = enabled;
+          saveButton.hidden = !enabled;
+          cancelButton.hidden = !enabled;
+          if (enabled) {
+            originalOrder = rows().map((row) => row.dataset.workId);
+          }
+          syncDraggable();
+        };
+
+        const rowAfterPointer = (y) => {
+          const candidates = rows().filter((row) => row !== dragRow);
+          let closest = null;
+          let offset = Number.NEGATIVE_INFINITY;
+
+          candidates.forEach((row) => {
+            const box = row.getBoundingClientRect();
+            const currentOffset = y - box.top - box.height / 2;
+            if (currentOffset < 0 && currentOffset > offset) {
+              offset = currentOffset;
+              closest = row;
+            }
+          });
+
+          return closest;
+        };
+
+        toggleButton.addEventListener("click", () => setSortMode(true));
+        cancelButton.addEventListener("click", () => {
+          restoreOrder();
+          setSortMode(false);
+        });
+        saveButton.addEventListener("click", () => {
+          orderInput.value = rows().map((row) => row.dataset.workId).join(",");
+          reorderForm.submit();
+        });
+
+        tbody.addEventListener("dragstart", (event) => {
+          if (!sortMode) {
+            event.preventDefault();
+            return;
+          }
+          dragRow = event.target.closest("tr[data-work-id]");
+          if (!dragRow) {
+            event.preventDefault();
+            return;
+          }
+          dragRow.classList.add("is-dragging");
+          event.dataTransfer.effectAllowed = "move";
+        });
+
+        tbody.addEventListener("dragend", () => {
+          if (dragRow) {
+            dragRow.classList.remove("is-dragging");
+          }
+          dragRow = null;
+        });
+
+        tbody.addEventListener("dragover", (event) => {
+          if (!sortMode || !dragRow) {
+            return;
+          }
+          event.preventDefault();
+          const nextRow = rowAfterPointer(event.clientY);
+          if (nextRow) {
+            tbody.insertBefore(dragRow, nextRow);
+          } else {
+            tbody.appendChild(dragRow);
+          }
+        });
+      })();
+    </script>
+  {% endif %}
+{% endblock %}

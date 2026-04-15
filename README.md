@@ -1,14 +1,14 @@
-# ヤフオク通知サイト
+# AI作品管理ボード
 
-ヤフオクの商品URLと通知時刻を登録すると、指定時刻にDiscordへ通知を送る個人用サイトです。
+AIのバイブコーディング作品を一覧で管理し、作品ごとの GitHub リンクと更新履歴を記録する Flask アプリです。
 
 ## できること
 
-- 商品URLを登録
-- 日本時間で通知時刻を登録
-- Discord Webhook チャンネルへ通知を送信
-- 登録済み通知の一覧表示
-- 不要な通知の削除
+- 作品名、GitHubリンク、メモを登録
+- 各作品に対して最終保存日つきの更新履歴を追加
+- 一覧表で `ID / 作品名 / 更新情報 / 最終保存日 / メモ` を確認
+- `中を見る` から作品ごとの詳細ページへ移動
+- 詳細ページで GitHubリンク、最終保存日、更新内容を確認
 
 ## セットアップ
 
@@ -16,10 +16,7 @@
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
-cp .env.example .env
 ```
-
-`.env` に Discord Webhook 情報を入れてください。
 
 ## 起動
 
@@ -30,30 +27,11 @@ python3 app.py
 
 ブラウザで `http://127.0.0.1:5001` を開きます。
 
-- 新規登録画面: `http://127.0.0.1:5001/alerts/new`
-- 一覧画面: `http://127.0.0.1:5001/alerts/list`
+- 一覧画面: `http://127.0.0.1:5001/works`
+- 新規登録画面: `http://127.0.0.1:5001/works/new`
 
-## Discord設定
+## 保存先
 
-- `DISCORD_WEBHOOK_URL`: DiscordチャンネルのWebhook URL
-- `DISCORD_USERNAME`: 投稿時に表示するBot名
-- `DISCORD_AVATAR_URL`: 投稿時に表示するアイコンURL。空で可
-- `DISCORD_MENTION_TEXT`: `@everyone` やロールメンションを先頭に付けたいときに使用。空で可
-
-## メモ
-
-- 通知データはローカルの `app.db` に保存されます。
-- アプリを再起動すると、未送信の通知は自動で再登録されます。
-- サーバーを止めている間に時刻を過ぎた通知は、起動時に即時送信を試みます。
-- `.env` を更新したら Flask の再起動が必要です。
-- DiscordのWebhook URLは外部に漏らさないでください。
-
-## Vercelについて
-
-- Vercel本番で通知まで運用するには `DATABASE_URL` と `CRON_SECRET` を Environment Variables に設定します。
-- Vercel本番では常駐スケジューラを使わず、`/api/cron` を定期実行して「今送るべき通知」を処理します。
-- このリポジトリには GitHub Actions で5分ごとに `/api/cron` を呼ぶ workflow を含めています。
-- GitHub repository secrets に以下を設定してください。
-  - `CRON_ENDPOINT_URL`: 例 `https://yahuoku-tuuchi.vercel.app/api/cron`
-  - `CRON_SECRET`: `.env` と同じ値
-- Vercel で外部DBが未設定だと、画面は表示できますが登録保存は無効です。
+- ローカルでは `app.db` を使用します。
+- Vercel では `DATABASE_URL` を設定すると永続保存できます。
+- Postgres を使う場合は `psycopg` が必要です。
