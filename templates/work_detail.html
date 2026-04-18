@@ -8,6 +8,80 @@
     <article class="panel detail-panel">
       <div class="detail-meta">
         <div class="detail-card">
+          <div class="detail-card-head">
+            <span>ローカルサイト</span>
+            {% if request.args.get("edit") == "local" %}
+              <a href="{{ url_for('work_detail', work_id=work.id) }}" class="ghost-button mini-ghost-button">閉じる</a>
+            {% else %}
+              <a href="{{ url_for('work_detail', work_id=work.id, edit='local') }}" class="ghost-button mini-ghost-button">編集</a>
+            {% endif %}
+          </div>
+          {% if request.args.get("edit") == "local" %}
+            <form action="{{ url_for('update_work_site', work_id=work.id, site_type='local') }}" method="post" class="entry-form compact-form">
+              <label class="field">
+                <input
+                  type="url"
+                  name="local_site_url"
+                  value="{{ work.local_site_url or '' }}"
+                  placeholder="http://127.0.0.1:5001/works"
+                />
+              </label>
+              <div class="feature-actions">
+                <button type="submit" class="primary-button" {% if not app_env.has_persistent_storage %}disabled{% endif %}>
+                  保存する
+                </button>
+              </div>
+            </form>
+          {% else %}
+            {% if work.local_site_url %}
+              <strong>
+                <a href="{{ work.local_site_url }}" target="_blank" rel="noopener noreferrer" class="detail-card-link">
+                  {{ work.local_site_url }}
+                </a>
+              </strong>
+            {% else %}
+              <strong>-</strong>
+            {% endif %}
+          {% endif %}
+        </div>
+        <div class="detail-card">
+          <div class="detail-card-head">
+            <span>Vercelサイト</span>
+            {% if request.args.get("edit") == "vercel" %}
+              <a href="{{ url_for('work_detail', work_id=work.id) }}" class="ghost-button mini-ghost-button">閉じる</a>
+            {% else %}
+              <a href="{{ url_for('work_detail', work_id=work.id, edit='vercel') }}" class="ghost-button mini-ghost-button">編集</a>
+            {% endif %}
+          </div>
+          {% if request.args.get("edit") == "vercel" %}
+            <form action="{{ url_for('update_work_site', work_id=work.id, site_type='vercel') }}" method="post" class="entry-form compact-form">
+              <label class="field">
+                <input
+                  type="url"
+                  name="vercel_site_url"
+                  value="{{ work.vercel_site_url or '' }}"
+                  placeholder="https://your-app.vercel.app"
+                />
+              </label>
+              <div class="feature-actions">
+                <button type="submit" class="primary-button" {% if not app_env.has_persistent_storage %}disabled{% endif %}>
+                  保存する
+                </button>
+              </div>
+            </form>
+          {% else %}
+            {% if work.vercel_site_url %}
+              <strong>
+                <a href="{{ work.vercel_site_url }}" target="_blank" rel="noopener noreferrer" class="detail-card-link">
+                  {{ work.vercel_site_url }}
+                </a>
+              </strong>
+            {% else %}
+              <strong>-</strong>
+            {% endif %}
+          {% endif %}
+        </div>
+        <div class="detail-card">
           <span>最終保存日</span>
           <strong>{{ work.last_saved_at|datetime_jst }}</strong>
         </div>

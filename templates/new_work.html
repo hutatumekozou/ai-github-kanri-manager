@@ -24,6 +24,26 @@
       </div>
 
       <div class="form-grid form-grid-single">
+        <div class="form-grid">
+          <label class="field">
+            <span>ローカルサイト</span>
+            <input
+              type="url"
+              name="local_site_url"
+              placeholder="http://127.0.0.1:5001/works"
+            />
+          </label>
+
+          <label class="field">
+            <span>Vercelサイト</span>
+            <input
+              type="url"
+              name="vercel_site_url"
+              placeholder="https://your-app.vercel.app"
+            />
+          </label>
+        </div>
+
         <label class="field">
           <span>最終保存日</span>
           <input type="datetime-local" name="saved_at" value="{{ default_saved_at }}" required />

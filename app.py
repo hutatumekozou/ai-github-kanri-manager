@@ -80,6 +80,8 @@ def init_db() -> None:
                     id BIGSERIAL PRIMARY KEY,
                     title TEXT NOT NULL,
                     github_url TEXT NOT NULL,
+                    local_site_url TEXT,
+                    vercel_site_url TEXT,
                     note TEXT NOT NULL DEFAULT '',
                     display_order BIGINT NOT NULL DEFAULT 0,
                     created_at TEXT NOT NULL
@@ -89,6 +91,14 @@ def init_db() -> None:
             db_execute(
                 connection,
                 "ALTER TABLE works ADD COLUMN IF NOT EXISTS display_order BIGINT NOT NULL DEFAULT 0",
+            )
+            db_execute(
+                connection,
+                "ALTER TABLE works ADD COLUMN IF NOT EXISTS local_site_url TEXT",
+            )
+            db_execute(
+                connection,
+                "ALTER TABLE works ADD COLUMN IF NOT EXISTS vercel_site_url TEXT",
             )
             db_execute(
                 connection,
@@ -115,6 +125,8 @@ def init_db() -> None:
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     title TEXT NOT NULL,
                     github_url TEXT NOT NULL,
+                    local_site_url TEXT,
+                    vercel_site_url TEXT,
                     note TEXT NOT NULL DEFAULT '',
                     display_order INTEGER NOT NULL DEFAULT 0,
                     created_at TEXT NOT NULL
@@ -129,6 +141,16 @@ def init_db() -> None:
                 db_execute(
                     connection,
                     "ALTER TABLE works ADD COLUMN display_order INTEGER NOT NULL DEFAULT 0",
+                )
+            if "local_site_url" not in work_columns:
+                db_execute(
+                    connection,
+                    "ALTER TABLE works ADD COLUMN local_site_url TEXT",
+                )
+            if "vercel_site_url" not in work_columns:
+                db_execute(
+                    connection,
+                    "ALTER TABLE works ADD COLUMN vercel_site_url TEXT",
                 )
             db_execute(
                 connection,
@@ -208,18 +230,18 @@ def init_db() -> None:
         connection.close()
 
 
-def normalize_url(raw_url: str) -> str:
+def normalize_url(raw_url: str, label: str = "URL") -> str:
     parsed = urlparse(raw_url.strip())
     if parsed.scheme not in {"http", "https"} or not parsed.netloc:
-        raise ValueError("GitHubリンクは http または https で始まる正しいURLを指定してください。")
+        raise ValueError(f"{label}は http または https で始まる正しいURLを指定してください。")
     return raw_url.strip()
 
 
-def normalize_optional_url(raw_url: str) -> str | None:
+def normalize_optional_url(raw_url: str, label: str = "URL") -> str | None:
     value = raw_url.strip()
     if not value:
         return None
-    return normalize_url(value)
+    return normalize_url(value, label)
 
 
 def parse_saved_at(raw_saved_at: str) -> datetime:
@@ -251,6 +273,8 @@ def list_works(search: str = "") -> list[Any]:
             (
                 w.title LIKE ?
                 OR w.github_url LIKE ?
+                OR COALESCE(w.local_site_url, '') LIKE ?
+                OR COALESCE(w.vercel_site_url, '') LIKE ?
                 OR w.note LIKE ?
                 OR EXISTS (
                     SELECT 1
@@ -264,7 +288,7 @@ def list_works(search: str = "") -> list[Any]:
             )
             """
         )
-        params.extend([like, like, like, like, like])
+        params.extend([like, like, like, like, like, like, like])
 
     where_clause = f"WHERE {' AND '.join(conditions)}" if conditions else ""
     query = f"""
@@ -293,7 +317,9 @@ def list_works(search: str = "") -> list[Any]:
                 SELECT COUNT(*)
                 FROM work_updates wu
                 WHERE wu.work_id = w.id
-            ) AS update_count
+            ) AS update_count,
+            w.local_site_url,
+            w.vercel_site_url
         FROM works w
         {where_clause}
         ORDER BY w.display_order ASC, w.id DESC
@@ -326,6 +352,8 @@ def fetch_work(work_id: int) -> Optional[Any]:
             w.id,
             w.title,
             w.github_url,
+            w.local_site_url,
+            w.vercel_site_url,
             w.note,
             w.display_order,
             w.created_at,
@@ -422,7 +450,9 @@ def create_work() -> Any:
 
     try:
         title = form.get("title", "").strip()
-        github_url = normalize_url(form.get("github_url", ""))
+        github_url = normalize_url(form.get("github_url", ""), "GitHubリンク")
+        local_site_url = normalize_optional_url(form.get("local_site_url", ""), "ローカルサイト")
+        vercel_site_url = normalize_optional_url(form.get("vercel_site_url", ""), "Vercelサイト")
         saved_at = parse_saved_at(form.get("saved_at", ""))
         update_content = form.get("update_content", "").strip()
         note = form.get("note", "").strip()
@@ -445,21 +475,37 @@ def create_work() -> Any:
         cursor = db_execute(
             db,
             """
-            INSERT INTO works (title, github_url, note, display_order, created_at)
-            VALUES (?, ?, ?, ?, ?)
+            INSERT INTO works (title, github_url, local_site_url, vercel_site_url, note, display_order, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
             RETURNING id
             """,
-            (title, github_url, note, next_work_display_order(), timestamp),
+            (
+                title,
+                github_url,
+                local_site_url,
+                vercel_site_url,
+                note,
+                next_work_display_order(),
+                timestamp,
+            ),
         )
         work_id = cursor.fetchone()["id"]
     else:
         cursor = db_execute(
             db,
             """
-            INSERT INTO works (title, github_url, note, display_order, created_at)
-            VALUES (?, ?, ?, ?, ?)
+            INSERT INTO works (title, github_url, local_site_url, vercel_site_url, note, display_order, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
             """,
-            (title, github_url, note, next_work_display_order(), timestamp),
+            (
+                title,
+                github_url,
+                local_site_url,
+                vercel_site_url,
+                note,
+                next_work_display_order(),
+                timestamp,
+            ),
         )
         work_id = cursor.lastrowid
 
@@ -509,7 +555,10 @@ def create_work_update(work_id: int) -> Any:
 
     try:
         saved_at = parse_saved_at(request.form.get("saved_at", ""))
-        update_github_url = normalize_optional_url(request.form.get("update_github_url", ""))
+        update_github_url = normalize_optional_url(
+            request.form.get("update_github_url", ""),
+            "別のGitHubリンク",
+        )
     except ValueError as exc:
         flash(str(exc), "error")
         return redirect(url_for("work_detail", work_id=work_id))
@@ -565,6 +614,84 @@ def update_work_features(work_id: int) -> Any:
     db.commit()
 
     flash("このアプリの特徴を更新しました。", "success")
+    return redirect(url_for("work_detail", work_id=work_id))
+
+
+@app.route("/works/<int:work_id>/sites", methods=["POST"])
+def update_work_sites(work_id: int) -> Any:
+    if not app_runtime_status()["has_persistent_storage"]:
+        flash("この環境では永続DBが未設定です。DATABASE_URL を設定してください。", "error")
+        return redirect(url_for("work_detail", work_id=work_id))
+
+    work = fetch_work(work_id)
+    if work is None:
+        flash("作品が見つかりません。", "error")
+        return redirect(url_for("work_list"))
+
+    try:
+        local_site_url = normalize_optional_url(request.form.get("local_site_url", ""), "ローカルサイト")
+        vercel_site_url = normalize_optional_url(request.form.get("vercel_site_url", ""), "Vercelサイト")
+    except ValueError as exc:
+        flash(str(exc), "error")
+        return redirect(url_for("work_detail", work_id=work_id, edit="sites"))
+
+    db = get_db()
+    db_execute(
+        db,
+        """
+        UPDATE works
+        SET local_site_url = ?, vercel_site_url = ?
+        WHERE id = ?
+        """,
+        (local_site_url, vercel_site_url, work_id),
+    )
+    db.commit()
+
+    flash("サイトURLを更新しました。", "success")
+    return redirect(url_for("work_detail", work_id=work_id))
+
+
+@app.route("/works/<int:work_id>/sites/<site_type>", methods=["POST"])
+def update_work_site(work_id: int, site_type: str) -> Any:
+    if not app_runtime_status()["has_persistent_storage"]:
+        flash("この環境では永続DBが未設定です。DATABASE_URL を設定してください。", "error")
+        return redirect(url_for("work_detail", work_id=work_id))
+
+    work = fetch_work(work_id)
+    if work is None:
+        flash("作品が見つかりません。", "error")
+        return redirect(url_for("work_list"))
+
+    field_map = {
+        "local": ("local_site_url", "ローカルサイト"),
+        "vercel": ("vercel_site_url", "Vercelサイト"),
+    }
+    target = field_map.get(site_type)
+    if target is None:
+        flash("更新対象のサイト種別が不正です。", "error")
+        return redirect(url_for("work_detail", work_id=work_id))
+
+    field_name, label = target
+
+    try:
+        site_url = normalize_optional_url(request.form.get(field_name, ""), label)
+    except ValueError as exc:
+        flash(str(exc), "error")
+        return redirect(url_for("work_detail", work_id=work_id, edit=site_type))
+
+    db = get_db()
+    db_execute(
+        db,
+        f"""
+        UPDATE works
+        SET {field_name} = ?
+        WHERE id = ?
+        """,
+        (site_url, work_id),
+    )
+    db.commit()
+
+    flash(f"{label}を更新しました。", "success")
     return redirect(url_for("work_detail", work_id=work_id))
 
 

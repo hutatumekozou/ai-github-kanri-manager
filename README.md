@@ -25,6 +25,12 @@ source .venv/bin/activate
 python3 app.py
 ```
 
+1コマンドで起動する場合:
+
+```bash
+./start.command
+```
+
 ブラウザで `http://127.0.0.1:5001` を開きます。
 
 - 一覧画面: `http://127.0.0.1:5001/works`

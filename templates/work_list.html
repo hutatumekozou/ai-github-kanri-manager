@@ -70,6 +70,12 @@
                     <div class="cell-title">{{ work.title }}</div>
                   </div>
                   <div class="cell-sub">{{ work.github_url }}</div>
+                  {% if work.local_site_url %}
+                    <div class="cell-sub">ローカルサイト: {{ work.local_site_url }}</div>
+                  {% endif %}
+                  {% if work.vercel_site_url %}
+                    <div class="cell-sub">Vercelサイト: {{ work.vercel_site_url }}</div>
+                  {% endif %}
                 </td>
                 <td>
                   <a href="{{ url_for('work_detail', work_id=work.id) }}" class="detail-button">中を見る</a>

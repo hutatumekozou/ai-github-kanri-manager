@@ -477,6 +477,29 @@ textarea {
   line-height: 1.6;
 }
 
+.detail-card-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.detail-card-head span {
+  margin: 0;
+}
+
+.detail-card-link {
+  color: var(--accent);
+  word-break: break-all;
+}
+
+.mini-ghost-button {
+  min-height: 38px;
+  padding: 0 14px;
+  font-size: 0.82rem;
+  white-space: nowrap;
+}
+
 .memo-box {
   margin-top: 14px;
   padding: 18px;
