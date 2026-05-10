@@ -1,0 +1,98 @@
+{% extends "base.html" %}
+{% set title = skill.folder_name ~ " | AI作品管理ボード" %}
+{% set page_heading = skill.folder_name %}
+{% set page_description = "Skill.mdの保存場所、特徴、呼出プロンプト、本文を確認できます。" %}
+
+{% block content %}
+  <section class="detail-layout skill-detail-layout">
+    <article class="panel detail-panel">
+      <div class="detail-top-actions">
+        {% if request.args.get("edit") %}
+          <a href="{{ url_for('skill_detail', skill_id=skill.id) }}" class="ghost-button">閉じる</a>
+        {% else %}
+          <a href="{{ url_for('skill_detail', skill_id=skill.id, edit='1') }}" class="ghost-button">修正</a>
+        {% endif %}
+      </div>
+
+      {% if request.args.get("edit") %}
+        <form action="{{ url_for('update_skill', skill_id=skill.id) }}" method="post" class="entry-form">
+          <div class="form-grid">
+            <label class="field">
+              <span>フォルダ名</span>
+              <input type="text" name="folder_name" value="{{ skill.folder_name }}" required />
+            </label>
+
+            <label class="field">
+              <span>作成日</span>
+              <input type="date" name="created_on" value="{{ skill.created_on }}" required />
+            </label>
+          </div>
+
+          <label class="field field-block">
+            <span>保存場所</span>
+            <input type="text" name="storage_location" value="{{ skill.storage_location }}" required />
+          </label>
+
+          <label class="field field-block">
+            <span>このskillの特徴</span>
+            <textarea name="feature" rows="6" required>{{ skill.feature }}</textarea>
+          </label>
+
+          <label class="field field-block">
+            <span>呼出プロンプト</span>
+            <textarea name="invocation_prompt" rows="5" required>{{ skill.invocation_prompt }}</textarea>
+          </label>
+
+          <label class="field field-block">
+            <span>Skill.md の内容</span>
+            <textarea name="skill_md_content" rows="14">{{ skill.skill_md_content }}</textarea>
+          </label>
+
+          <div class="form-footer detail-edit-footer">
+            <a href="{{ url_for('skill_detail', skill_id=skill.id) }}" class="ghost-button">キャンセル</a>
+            <button type="submit" class="primary-button" {% if not app_env.has_persistent_storage %}disabled{% endif %}>
+              保存する
+            </button>
+          </div>
+        </form>
+      {% else %}
+        <div class="detail-meta">
+          <div class="detail-card">
+            <span>作成日</span>
+            <strong>{{ skill.created_on }}</strong>
+          </div>
+          <div class="detail-card">
+            <span>保存場所</span>
+            <strong class="break-text">{{ skill.storage_location }}</strong>
+          </div>
+        </div>
+
+        <div class="memo-box">
+          <h2>このskillの特徴</h2>
+          <p>{{ skill.feature|replace('\n', '<br />')|safe }}</p>
+        </div>
+
+        <div class="memo-box">
+          <h2>呼出プロンプト</h2>
+          <p>{{ skill.invocation_prompt|replace('\n', '<br />')|safe }}</p>
+        </div>
+
+        <details class="fold-section">
+          <summary>
+            <span>Skill.md の内容</span>
+            <small>クリックして本文を開く</small>
+          </summary>
+          {% if skill.skill_md_content %}
+            <pre class="code-block">{{ skill.skill_md_content }}</pre>
+          {% else %}
+            <div class="empty-state">Skill.md本文はまだ登録されていません。</div>
+          {% endif %}
+        </details>
+      {% endif %}
+
+      <div class="detail-footer-actions">
+        <a href="{{ url_for('skill_list') }}" class="ghost-button">一覧へ戻る</a>
+      </div>
+    </article>
+  </section>
+{% endblock %}

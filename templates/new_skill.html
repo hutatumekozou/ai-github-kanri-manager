@@ -1,0 +1,70 @@
+{% extends "base.html" %}
+{% set title = "Skill登録 | AI作品管理ボード" %}
+{% set page_heading = "Skill.md を登録" %}
+{% set page_description = "フォルダ名、作成日、保存場所、呼出プロンプト、特徴、Skill.md本文を記録します。" %}
+
+{% block content %}
+  <section class="panel form-panel">
+    <form action="{{ url_for('create_skill') }}" method="post" class="entry-form">
+      <div class="form-grid">
+        <label class="field">
+          <span>フォルダ名</span>
+          <input type="text" name="folder_name" placeholder="例: discord-study-system" required />
+        </label>
+
+        <label class="field">
+          <span>作成日</span>
+          <input type="date" name="created_on" value="{{ default_created_on }}" required />
+        </label>
+      </div>
+
+      <label class="field field-block">
+        <span>保存場所</span>
+        <input
+          type="text"
+          name="storage_location"
+          placeholder="/Users/name/.codex/skills/skill-folder"
+          required
+        />
+      </label>
+
+      <label class="field field-block">
+        <span>呼出プロンプト</span>
+        <textarea
+          name="invocation_prompt"
+          rows="4"
+          placeholder="このSkillを呼び出すときに使う文章やキーワード"
+          required
+        ></textarea>
+      </label>
+
+      <label class="field field-block">
+        <span>このskillの特徴</span>
+        <textarea
+          name="feature"
+          rows="5"
+          placeholder="何を自動化・補助するSkillか、得意な作業、注意点など"
+          required
+        ></textarea>
+      </label>
+
+      <label class="field field-block">
+        <span>Skill.md の内容</span>
+        <textarea
+          name="skill_md_content"
+          rows="12"
+          placeholder="Skill.md の本文を貼り付け"
+        ></textarea>
+      </label>
+
+      <div class="form-footer">
+        <div class="meta-note">
+          現在時刻: {{ now.strftime("%Y-%m-%d %H:%M") }} ({{ now.tzinfo.key }})
+        </div>
+        <button type="submit" class="primary-button" {% if not app_env.has_persistent_storage %}disabled{% endif %}>
+          Skillを保存する
+        </button>
+      </div>
+    </form>
+  </section>
+{% endblock %}

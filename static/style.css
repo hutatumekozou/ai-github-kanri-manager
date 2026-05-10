@@ -349,6 +349,19 @@ textarea {
   line-height: 1.7;
 }
 
+.path-cell,
+.break-text {
+  color: #4d3b2f;
+  line-height: 1.7;
+  word-break: break-all;
+}
+
+.table-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
 .primary-button,
 .dark-pill,
 .ghost-button,
@@ -442,6 +455,10 @@ textarea {
   gap: 16px;
 }
 
+.detail-edit-footer {
+  justify-content: flex-end;
+}
+
 .meta-note {
   color: var(--muted);
   font-size: 0.82rem;
@@ -454,9 +471,19 @@ textarea {
   gap: 14px;
 }
 
+.skill-detail-layout {
+  grid-template-columns: 1fr;
+}
+
 .detail-panel,
 .side-panel {
   height: fit-content;
+}
+
+.detail-top-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: 14px;
 }
 
 .detail-meta {
@@ -558,6 +585,89 @@ textarea {
   font-weight: 800;
   line-height: 1.6;
   word-break: break-all;
+}
+
+.fold-section {
+  margin-top: 20px;
+  border: 1px solid var(--line);
+  border-radius: 24px;
+  background: rgba(255, 255, 255, 0.58);
+  overflow: hidden;
+}
+
+.fold-section summary {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 14px;
+  min-height: 70px;
+  padding: 0 18px;
+  cursor: pointer;
+  list-style: none;
+}
+
+.fold-section summary::-webkit-details-marker {
+  display: none;
+}
+
+.fold-section summary::after {
+  content: "+";
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  min-width: 34px;
+  height: 34px;
+  border: 1px solid var(--line-strong);
+  border-radius: 999px;
+  color: var(--muted);
+  font-weight: 900;
+}
+
+.fold-section[open] summary::after {
+  content: "-";
+}
+
+.fold-section summary span {
+  font-size: 1.02rem;
+  font-weight: 900;
+}
+
+.fold-section summary small {
+  margin-left: auto;
+  color: var(--muted);
+  font-size: 0.82rem;
+  font-weight: 800;
+}
+
+.fold-section .code-block,
+.fold-section .empty-state {
+  border-right: 0;
+  border-bottom: 0;
+  border-left: 0;
+  border-radius: 0;
+}
+
+.detail-footer-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 14px;
+}
+
+.code-block {
+  margin: 0;
+  padding: 18px;
+  max-height: 560px;
+  overflow: auto;
+  border: 1px solid var(--line);
+  border-radius: 24px;
+  background: #1f1712;
+  color: #fff8ef;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.9rem;
+  line-height: 1.7;
+  white-space: pre-wrap;
+  word-break: break-word;
 }
 
 @media (max-width: 980px) {

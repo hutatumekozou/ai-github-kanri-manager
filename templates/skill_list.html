@@ -1,0 +1,77 @@
+{% extends "base.html" %}
+{% set title = "Skill一覧 | AI作品管理ボード" %}
+{% set page_heading = "Skill.md 記録一覧" %}
+{% set page_description = "その都度作成したSkill.mdの内容、保存場所、特徴、呼出プロンプトを作品とは別に管理します。" %}
+
+{% block content %}
+  <section class="panel filter-panel">
+    <form action="{{ url_for('skill_list') }}" method="get" class="filter-row">
+      <input
+        type="search"
+        name="q"
+        value="{{ filters.q }}"
+        placeholder="フォルダ名、保存場所、特徴、呼出プロンプト、Skill.md本文で検索"
+        class="pill-input search-input"
+      />
+      <button type="submit" class="dark-pill">検索する</button>
+      <a href="{{ url_for('new_skill') }}" class="dark-pill ghost-dark">Skillを追加</a>
+    </form>
+
+    <div class="summary-grid">
+      <div class="summary-chip">
+        <span>登録Skill数</span>
+        <strong>{{ counts.skills }}</strong>
+      </div>
+    </div>
+  </section>
+
+  <section class="panel table-panel">
+    {% if skills %}
+      <div class="table-wrap">
+        <table class="work-table skill-table">
+          <thead>
+            <tr>
+              <th>フォルダ名</th>
+              <th>作成日</th>
+              <th>保存場所</th>
+              <th>このskillの特徴</th>
+              <th>呼出プロンプト</th>
+              <th>操作</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for skill in skills %}
+              <tr>
+                <td>
+                  <div class="cell-title">{{ skill.folder_name }}</div>
+                </td>
+                <td>{{ skill.created_on }}</td>
+                <td class="path-cell">{{ skill.storage_location }}</td>
+                <td class="note-cell">{{ skill.feature }}</td>
+                <td class="note-cell">{{ skill.invocation_prompt }}</td>
+                <td>
+                  <div class="table-actions">
+                    <a href="{{ url_for('skill_detail', skill_id=skill.id) }}" class="detail-button">中を見る</a>
+                    <form
+                      action="{{ url_for('delete_skill', skill_id=skill.id) }}"
+                      method="post"
+                      onsubmit="return confirm('このSkill記録を削除しますか？');"
+                    >
+                      <button type="submit" class="ghost-button danger-button" {% if not app_env.has_persistent_storage %}disabled{% endif %}>
+                        削除
+                      </button>
+                    </form>
+                  </div>
+                </td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    {% else %}
+      <div class="empty-state">
+        まだSkill記録がありません。Skill登録から Skill.md の内容を残してください。
+      </div>
+    {% endif %}
+  </section>
+{% endblock %}

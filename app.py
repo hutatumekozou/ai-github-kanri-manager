@@ -117,6 +117,25 @@ def init_db() -> None:
                 connection,
                 "ALTER TABLE work_updates ADD COLUMN IF NOT EXISTS update_github_url TEXT",
             )
+            db_execute(
+                connection,
+                """
+                CREATE TABLE IF NOT EXISTS skills (
+                    id BIGSERIAL PRIMARY KEY,
+                    folder_name TEXT NOT NULL,
+                    created_on TEXT NOT NULL,
+                    storage_location TEXT NOT NULL,
+                    invocation_prompt TEXT NOT NULL,
+                    feature TEXT NOT NULL,
+                    skill_md_content TEXT NOT NULL DEFAULT '',
+                    created_at TEXT NOT NULL
+                )
+                """,
+            )
+            db_execute(
+                connection,
+                "ALTER TABLE skills ADD COLUMN IF NOT EXISTS skill_md_content TEXT NOT NULL DEFAULT ''",
+            )
         else:
             db_execute(
                 connection,
@@ -174,6 +193,30 @@ def init_db() -> None:
                 db_execute(
                     connection,
                     "ALTER TABLE work_updates ADD COLUMN update_github_url TEXT",
+                )
+            db_execute(
+                connection,
+                """
+                CREATE TABLE IF NOT EXISTS skills (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    folder_name TEXT NOT NULL,
+                    created_on TEXT NOT NULL,
+                    storage_location TEXT NOT NULL,
+                    invocation_prompt TEXT NOT NULL,
+                    feature TEXT NOT NULL,
+                    skill_md_content TEXT NOT NULL DEFAULT '',
+                    created_at TEXT NOT NULL
+                )
+                """,
+            )
+            skill_columns = {
+                row[1]
+                for row in db_execute(connection, "PRAGMA table_info(skills)").fetchall()
+            }
+            if "skill_md_content" not in skill_columns:
+                db_execute(
+                    connection,
+                    "ALTER TABLE skills ADD COLUMN skill_md_content TEXT NOT NULL DEFAULT ''",
                 )
         db_execute(
             connection,
@@ -250,6 +293,14 @@ def parse_saved_at(raw_saved_at: str) -> datetime:
     except ValueError as exc:
         raise ValueError("最終保存日の形式が正しくありません。") from exc
     return saved_at.replace(tzinfo=TIMEZONE)
+
+
+def parse_created_on(raw_created_on: str) -> str:
+    try:
+        datetime.strptime(raw_created_on, "%Y-%m-%d")
+    except ValueError as exc:
+        raise ValueError("作成日の形式が正しくありません。") from exc
+    return raw_created_on
 
 
 def format_datetime(value: str | None) -> str:
@@ -341,6 +392,71 @@ def work_summary() -> dict[str, int]:
         "works": row["work_count"] or 0,
         "updates": row["update_count"] or 0,
     }
+
+
+def list_skills(search: str = "") -> list[Any]:
+    db = get_db()
+    conditions = []
+    params: list[Any] = []
+
+    if search:
+        like = f"%{search}%"
+        conditions.append(
+            """
+            (
+                folder_name LIKE ?
+                OR storage_location LIKE ?
+                OR invocation_prompt LIKE ?
+                OR feature LIKE ?
+                OR skill_md_content LIKE ?
+            )
+            """
+        )
+        params.extend([like, like, like, like, like])
+
+    where_clause = f"WHERE {' AND '.join(conditions)}" if conditions else ""
+    query = f"""
+        SELECT
+            id,
+            folder_name,
+            created_on,
+            storage_location,
+            invocation_prompt,
+            feature,
+            skill_md_content,
+            created_at
+        FROM skills
+        {where_clause}
+        ORDER BY created_on DESC, id DESC
+    """
+    return db_execute(db, query, tuple(params)).fetchall()
+
+
+def skill_summary() -> dict[str, int]:
+    db = get_db()
+    row = db_execute(db, "SELECT COUNT(*) AS skill_count FROM skills").fetchone()
+    return {"skills": row["skill_count"] or 0}
+
+
+def fetch_skill(skill_id: int) -> Optional[Any]:
+    db = get_db()
+    return db_execute(
+        db,
+        """
+        SELECT
+            id,
+            folder_name,
+            created_on,
+            storage_location,
+            invocation_prompt,
+            feature,
+            skill_md_content,
+            created_at
+        FROM skills
+        WHERE id = ?
+        """,
+        (skill_id,),
+    ).fetchone()
 
 
 def fetch_work(work_id: int) -> Optional[Any]:
@@ -438,6 +554,211 @@ def new_work() -> str:
         default_saved_at=now.strftime("%Y-%m-%dT%H:%M"),
         active_page="new",
     )
+
+
+@app.route("/skills", methods=["GET"])
+def skill_list() -> str:
+    search = request.args.get("q", "").strip()
+    skills = list_skills(search)
+    return render_template(
+        "skill_list.html",
+        skills=skills,
+        filters={"q": search},
+        counts=skill_summary(),
+        active_page="skills",
+    )
+
+
+@app.route("/skills/new", methods=["GET"])
+def new_skill() -> str:
+    now = datetime.now(TIMEZONE)
+    return render_template(
+        "new_skill.html",
+        now=now,
+        default_created_on=now.strftime("%Y-%m-%d"),
+        active_page="new_skill",
+    )
+
+
+@app.route("/skills", methods=["POST"])
+def create_skill() -> Any:
+    if not app_runtime_status()["has_persistent_storage"]:
+        flash("この環境では永続DBが未設定です。DATABASE_URL を設定してください。", "error")
+        return redirect(url_for("new_skill"))
+
+    form = request.form
+
+    try:
+        folder_name = form.get("folder_name", "").strip()
+        created_on = parse_created_on(form.get("created_on", ""))
+        storage_location = form.get("storage_location", "").strip()
+        invocation_prompt = form.get("invocation_prompt", "").strip()
+        feature = form.get("feature", "").strip()
+        skill_md_content = form.get("skill_md_content", "").strip()
+    except ValueError as exc:
+        flash(str(exc), "error")
+        return redirect(url_for("new_skill"))
+
+    required_fields = {
+        "フォルダ名": folder_name,
+        "保存場所": storage_location,
+        "呼出プロンプト": invocation_prompt,
+        "このskillの特徴": feature,
+    }
+    for label, value in required_fields.items():
+        if not value:
+            flash(f"{label}を入力してください。", "error")
+            return redirect(url_for("new_skill"))
+
+    db = get_db()
+    if USE_POSTGRES:
+        cursor = db_execute(
+            db,
+            """
+            INSERT INTO skills (
+                folder_name,
+                created_on,
+                storage_location,
+                invocation_prompt,
+                feature,
+                skill_md_content,
+                created_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            RETURNING id
+            """,
+            (
+                folder_name,
+                created_on,
+                storage_location,
+                invocation_prompt,
+                feature,
+                skill_md_content,
+                datetime.now(TIMEZONE).isoformat(),
+            ),
+        )
+        skill_id = cursor.fetchone()["id"]
+    else:
+        cursor = db_execute(
+            db,
+            """
+            INSERT INTO skills (
+                folder_name,
+                created_on,
+                storage_location,
+                invocation_prompt,
+                feature,
+                skill_md_content,
+                created_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                folder_name,
+                created_on,
+                storage_location,
+                invocation_prompt,
+                feature,
+                skill_md_content,
+                datetime.now(TIMEZONE).isoformat(),
+            ),
+        )
+        skill_id = cursor.lastrowid
+    db.commit()
+
+    flash("Skillを登録しました。", "success")
+    return redirect(url_for("skill_detail", skill_id=skill_id))
+
+
+@app.route("/skills/<int:skill_id>", methods=["GET"])
+def skill_detail(skill_id: int) -> Any:
+    skill = fetch_skill(skill_id)
+    if skill is None:
+        flash("Skillが見つかりません。", "error")
+        return redirect(url_for("skill_list"))
+
+    return render_template(
+        "skill_detail.html",
+        skill=skill,
+        active_page="skills",
+    )
+
+
+@app.route("/skills/<int:skill_id>/edit", methods=["POST"])
+def update_skill(skill_id: int) -> Any:
+    if not app_runtime_status()["has_persistent_storage"]:
+        flash("この環境では永続DBが未設定です。DATABASE_URL を設定してください。", "error")
+        return redirect(url_for("skill_detail", skill_id=skill_id))
+
+    skill = fetch_skill(skill_id)
+    if skill is None:
+        flash("Skillが見つかりません。", "error")
+        return redirect(url_for("skill_list"))
+
+    form = request.form
+    try:
+        folder_name = form.get("folder_name", "").strip()
+        created_on = parse_created_on(form.get("created_on", ""))
+        storage_location = form.get("storage_location", "").strip()
+        feature = form.get("feature", "").strip()
+        invocation_prompt = form.get("invocation_prompt", "").strip()
+        skill_md_content = form.get("skill_md_content", "").strip()
+    except ValueError as exc:
+        flash(str(exc), "error")
+        return redirect(url_for("skill_detail", skill_id=skill_id, edit="1"))
+
+    required_fields = {
+        "フォルダ名": folder_name,
+        "保存場所": storage_location,
+        "このskillの特徴": feature,
+        "呼出プロンプト": invocation_prompt,
+    }
+    for label, value in required_fields.items():
+        if not value:
+            flash(f"{label}を入力してください。", "error")
+            return redirect(url_for("skill_detail", skill_id=skill_id, edit="1"))
+
+    db = get_db()
+    db_execute(
+        db,
+        """
+        UPDATE skills
+        SET
+            folder_name = ?,
+            created_on = ?,
+            storage_location = ?,
+            feature = ?,
+            invocation_prompt = ?,
+            skill_md_content = ?
+        WHERE id = ?
+        """,
+        (
+            folder_name,
+            created_on,
+            storage_location,
+            feature,
+            invocation_prompt,
+            skill_md_content,
+            skill_id,
+        ),
+    )
+    db.commit()
+
+    flash("Skillを更新しました。", "success")
+    return redirect(url_for("skill_detail", skill_id=skill_id))
+
+
+@app.route("/skills/<int:skill_id>/delete", methods=["POST"])
+def delete_skill(skill_id: int) -> Any:
+    if not app_runtime_status()["has_persistent_storage"]:
+        flash("この環境では永続DBが未設定です。DATABASE_URL を設定してください。", "error")
+        return redirect(url_for("skill_list"))
+
+    db = get_db()
+    db_execute(db, "DELETE FROM skills WHERE id = ?", (skill_id,))
+    db.commit()
+    flash("Skillを削除しました。", "success")
+    return redirect(url_for("skill_list"))
 
 
 @app.route("/works", methods=["POST"])

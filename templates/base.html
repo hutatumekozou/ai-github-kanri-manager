@@ -28,6 +28,18 @@
               >
                 新規登録
               </a>
+              <a
+                href="{{ url_for('skill_list') }}"
+                class="nav-link {% if active_page == 'skills' %}is-active{% endif %}"
+              >
+                Skill一覧
+              </a>
+              <a
+                href="{{ url_for('new_skill') }}"
+                class="nav-link {% if active_page == 'new_skill' %}is-active{% endif %}"
+              >
+                Skill登録
+              </a>
             </nav>
           </div>
           <p class="lead">{{ page_description }}</p>
