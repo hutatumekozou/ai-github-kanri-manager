@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 import sqlite3
 from datetime import datetime
@@ -30,6 +31,7 @@ IS_VERCEL = bool(os.getenv("VERCEL"))
 DATABASE_URL = os.getenv("DATABASE_URL", "").strip()
 USE_POSTGRES = bool(DATABASE_URL)
 DATABASE_PATH = Path("/tmp/app.db") if IS_VERCEL and not USE_POSTGRES else BASE_DIR / "app.db"
+SEED_DIR = BASE_DIR / "data"
 TIMEZONE = ZoneInfo(os.getenv("APP_TIMEZONE", "Asia/Tokyo"))
 
 app = Flask(__name__)
@@ -54,6 +56,103 @@ def open_db_connection() -> Any:
 
 def db_execute(connection: Any, query: str, params: tuple[Any, ...] = ()) -> Any:
     return connection.execute(adapt_query(query), params)
+
+
+def load_seed_rows(name: str) -> list[dict[str, Any]]:
+    seed_path = SEED_DIR / f"seed_{name}.json"
+    if not seed_path.exists():
+        return []
+    with seed_path.open(encoding="utf-8") as seed_file:
+        return json.load(seed_file)
+
+
+def seed_sqlite_from_snapshots(connection: Any) -> None:
+    if not IS_VERCEL or USE_POSTGRES:
+        return
+
+    existing_count = db_execute(connection, "SELECT COUNT(*) AS count FROM works").fetchone()["count"]
+    if existing_count:
+        return
+
+    for row in load_seed_rows("works"):
+        db_execute(
+            connection,
+            """
+            INSERT OR IGNORE INTO works (
+                id,
+                title,
+                github_url,
+                local_site_url,
+                vercel_site_url,
+                note,
+                display_order,
+                created_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                row["id"],
+                row["title"],
+                row["github_url"],
+                row.get("local_site_url"),
+                row.get("vercel_site_url"),
+                row.get("note", ""),
+                row.get("display_order", 0),
+                row["created_at"],
+            ),
+        )
+
+    for row in load_seed_rows("work_updates"):
+        db_execute(
+            connection,
+            """
+            INSERT OR IGNORE INTO work_updates (
+                id,
+                work_id,
+                saved_at,
+                update_github_url,
+                update_content,
+                created_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            (
+                row["id"],
+                row["work_id"],
+                row["saved_at"],
+                row.get("update_github_url"),
+                row["update_content"],
+                row["created_at"],
+            ),
+        )
+
+    for row in load_seed_rows("skills"):
+        db_execute(
+            connection,
+            """
+            INSERT OR IGNORE INTO skills (
+                id,
+                folder_name,
+                created_on,
+                storage_location,
+                invocation_prompt,
+                feature,
+                skill_md_content,
+                created_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                row["id"],
+                row["folder_name"],
+                row["created_on"],
+                row["storage_location"],
+                row["invocation_prompt"],
+                row["feature"],
+                row.get("skill_md_content", ""),
+                row["created_at"],
+            ),
+        )
 
 
 def get_db() -> Any:
@@ -218,6 +317,7 @@ def init_db() -> None:
                     connection,
                     "ALTER TABLE skills ADD COLUMN skill_md_content TEXT NOT NULL DEFAULT ''",
                 )
+            seed_sqlite_from_snapshots(connection)
         db_execute(
             connection,
             """
