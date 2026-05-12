@@ -871,7 +871,7 @@ def create_work() -> Any:
 
     try:
         title = form.get("title", "").strip()
-        github_url = normalize_url(form.get("github_url", ""), "GitHubリンク")
+        github_url = normalize_optional_url(form.get("github_url", ""), "GitHubリンク") or ""
         local_site_url = normalize_optional_url(form.get("local_site_url", ""), "ローカルサイト")
         vercel_site_url = normalize_optional_url(form.get("vercel_site_url", ""), "Vercelサイト")
         saved_at = parse_saved_at(form.get("saved_at", ""))
